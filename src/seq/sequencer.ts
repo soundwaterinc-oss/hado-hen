@@ -40,14 +40,14 @@ export const DEFAULT_LANES: Record<Lane, LaneCfg> = {
   kick:  { layers: [ly("DOWNBEAT", FOLLOW, 3, 8, 0)],  combine: "OR", prob: 1 },
   sub:   { layers: [ly("POLY", FOLLOW, 1, 6, 0)],      combine: "OR", prob: 1 },
   drag:  { layers: [ly("POLY", FOLLOW, 1, 7, 3)],      combine: "OR", prob: 1 },
-  sus:   { layers: [ly("POLY", FOLLOW, 2, 10, 0)],     combine: "OR", prob: 1 },
-  cak:   { layers: [ly("WORLD", FOLLOW, 3, 8, 0, "Cinquillo")], combine: "OR", prob: 0.9 },
-  knock: { layers: [ly("POLY", FOLLOW, 3, 5, 0)],      combine: "OR", prob: 1 },
-  roll:  { layers: [ly("POLY", FOLLOW, 2, 4, 0)],      combine: "OR", prob: 0.9 },
-  click: { layers: [ly("EUCLID", FOLLOW, 6, 8, 2)],    combine: "OR", prob: 1 },
-  tick:  { layers: [ly("POLY", FOLLOW, 5, 7, 0)],      combine: "OR", prob: 0.95 },
-  noise: { layers: [ly("EUCLID", FOLLOW, 3, 8, 1)],    combine: "OR", prob: 0.85 },
-  beep:  { layers: [ly("POLY", FOLLOW, 1, 12, 5)],     combine: "OR", prob: 0.8 },
+  sus:   { layers: [ly("POLY", FOLLOW, 1, 12, 0)],     combine: "OR", prob: 1 },
+  cak:   { layers: [ly("WORLD", FOLLOW, 3, 8, 0, "Cinquillo")], combine: "OR", prob: 0.7 },
+  knock: { layers: [ly("POLY", FOLLOW, 2, 5, 0)],      combine: "OR", prob: 1 },
+  roll:  { layers: [ly("POLY", FOLLOW, 1, 6, 0)],      combine: "OR", prob: 0.8 },
+  click: { layers: [ly("EUCLID", FOLLOW, 4, 8, 2)],    combine: "OR", prob: 1 },
+  tick:  { layers: [ly("POLY", FOLLOW, 3, 8, 0)],      combine: "OR", prob: 0.85 },
+  noise: { layers: [ly("EUCLID", FOLLOW, 2, 8, 1)],    combine: "OR", prob: 0.7 },
+  beep:  { layers: [ly("POLY", FOLLOW, 1, 16, 5)],     combine: "OR", prob: 0.7 },
 };
 
 export type GateMode = "MANUAL" | "QUANTUM" | "AND" | "OR";

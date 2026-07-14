@@ -17,21 +17,21 @@ const state = {
   master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
   subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.45,
   // HADŌ quantum field
-  gateMode: "OR" as GateMode, gateThresh: 0.3, density: 0.35, fieldAmt: 0.5, fieldSpeed: 1.0, fieldExcite: 0.7,
+  gateMode: "OR" as GateMode, gateThresh: 0.34, density: 0.2, fieldAmt: 0.45, fieldSpeed: 1.0, fieldExcite: 0.6,
   // LIQUID — resonant squelch driven by a natural function
-  liquid: 0.16, liqSource: "LSYS" as NatureSource, liqBase: 480, liqDepth: 900, liqQ: 11,
+  liquid: 0.08, liqSource: "LSYS" as NatureSource, liqBase: 480, liqDepth: 900, liqQ: 11,
   liqRate: 0.5, liqDelay: 0.05, liqDelayMod: 0.4, liqFb: 0.4,
   // 自動展開 (auto-arranger)
   arrangeOn: false, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5,
   // MOD LFOs — major params auto-evolve via natural functions instead of staying fixed
   mods: [
-    { target: "liqBase",   source: "LSYS" as NatureSource,     rate: 0.14, depth: 0.6 },
-    { target: "density",   source: "KURAMOTO" as NatureSource, rate: 0.18, depth: 0.45 },
-    { target: "clickTone", source: "LOGISTIC" as NatureSource, rate: 0.1,  depth: 0.4 },
+    { target: "liqBase",   source: "LSYS" as NatureSource,     rate: 0.12, depth: 0.4 },
+    { target: "clickTone", source: "LOGISTIC" as NatureSource, rate: 0.08, depth: 0.25 },
+    { target: "— off —",   source: "KURAMOTO" as NatureSource, rate: 0.18, depth: 0.4 },
     { target: "— off —",   source: "SINE" as NatureSource,     rate: 0.3,  depth: 0.3 },
   ],
   grooveName: "7+5+9",
-  level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.72, cak: 0.7, knock: 0.7, roll: 1.0, click: 0.74, tick: 0.66, noise: 0.5, beep: 0.3 } as Record<Lane, number>,
+  level: { kick: 1.0, sub: 0.82, drag: 0.7, sus: 0.55, cak: 0.5, knock: 0.6, roll: 0.68, click: 0.62, tick: 0.5, noise: 0.32, beep: 0.2 } as Record<Lane, number>,
 };
 
 const field = new QuantumField(128);

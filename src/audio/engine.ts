@@ -68,7 +68,7 @@ export class AudioEngine {
 
     this.limiter = ctx.createDynamicsCompressor();
     this.limiter.ratio.value = 20; this.limiter.threshold.value = -3;
-    this.limiter.attack.value = 0.0015; this.limiter.release.value = 0.08; // tighter grip
+    this.limiter.attack.value = 0.0012; this.limiter.release.value = 0.06; // tight grip
 
     this.master = ctx.createGain(); this.master.gain.value = 0.9;
 
