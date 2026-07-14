@@ -106,7 +106,7 @@ export class Sequencer {
   private globalTL: TLEntry[];
   private tlCache = new Map<string, TLEntry[]>();
   private nextTime = 0;
-  private lookahead = 0.3;
+  lookahead = 0.5; // scheduled ahead of the clock — covers background timer jitter
 
   constructor(groove: Groove, private deps: SeqDeps, private getParams: () => SeqParams) {
     this.groove = groove;

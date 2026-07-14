@@ -9,6 +9,7 @@ import { QuantumField } from "./field/field";
 import { WORLD_NAMES, DEFAULT_WORLD } from "./seq/world";
 import { NatureMod, NATURE_SOURCES, type NatureSource } from "./seq/nature";
 import { Arranger, ARRANGE_ENGINES, type ArrangeEngine, type ArrangeOpts } from "./seq/arranger";
+import Clock from "./clock.ts?worker";
 import { el, slider, select } from "./ui/controls";
 
 // ---- state -----------------------------------------------------------------
@@ -144,7 +145,13 @@ playBtn.addEventListener("click", async () => {
     }
     await engine.resume();
     seq.toggle();
-    if (seq.running) { arranger.reset(); prevBar = -1; }
+    if (seq.running) {
+      arranger.reset(); prevBar = -1; lastTick = performance.now();
+      clock.postMessage({ type: "start", interval: 40 }); // worker drives scheduling → background-safe
+    } else {
+      clock.postMessage({ type: "stop" });
+    }
+    setMediaSession(seq.running);
     playBtn.classList.toggle("on", seq.running);
     playBtn.textContent = seq.running ? "■ STOP" : "▶ PLAY";
   } catch (err) {
@@ -152,6 +159,17 @@ playBtn.addEventListener("click", async () => {
     playBtn.textContent = "⚠ AUDIO ERROR";
   }
 });
+
+// MediaSession — OS media controls + signals "playing media" so the tab keeps audio alive
+function setMediaSession(playing: boolean): void {
+  if (!("mediaSession" in navigator)) return;
+  try {
+    navigator.mediaSession.metadata = new MediaMetadata({ title: "HADŌ HEN 波動変", artist: "EL-SYSTEMA", album: "変拍子 dot-beat" });
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+    navigator.mediaSession.setActionHandler("play", () => { if (!seq.running) playBtn.click(); });
+    navigator.mediaSession.setActionHandler("pause", () => { if (seq.running) playBtn.click(); });
+  } catch { /* not supported */ }
+}
 const grooveSel = select(Object.keys(GROOVES), state.grooveName, (v) => {
   state.grooveName = v; seq.setGroove(GROOVES[v] as Groove);
 });
@@ -420,21 +438,28 @@ function randomize(): void {
   rebuildLanes(); // reflect randomized layers in the controls
 }
 
-// ---- render loop -----------------------------------------------------------
-const sctx = scope.getContext("2d")!;
-const gctx = gridC.getContext("2d")!;
-let lastT = performance.now();
+// ---- clock (audio) — driven by a Web Worker so it keeps running in the background --------
+const clock = new Clock();
+let lastTick = performance.now();
+clock.onmessage = () => tick();
 
-function draw(): void {
+function tick(): void {
   const t = performance.now();
-  const dt = Math.min(0.05, (t - lastT) / 1000); lastT = t;
+  const dt = Math.min(0.1, (t - lastTick) / 1000); lastTick = t;
   field.step(dt, state.fieldSpeed); // HADŌ field always evolves
   // LIQUID moved by a natural function (optionally the field itself)
   const fSample = Math.max(field.probe(0.2), field.probe(0.5), field.probe(0.8));
   liqNature = natureMod.step(dt, state.liqRate, state.liqSource, fSample);
   computeMods(dt, fSample); // major params auto-evolve via their LFOs
-  seq.schedule();
   if (engine) engine.apply(engineParams());
+  seq.schedule();
+}
+
+// ---- render loop (visual only; pauses in the background, audio keeps going) --------------
+const sctx = scope.getContext("2d")!;
+const gctx = gridC.getContext("2d")!;
+
+function draw(): void {
   flash *= 0.86;
   grooveTag.textContent = `${state.grooveName} · bar ${curBar + 1}/${seq.groove.length}`;
 
@@ -524,3 +549,5 @@ function drawGrid(): void {
 }
 
 requestAnimationFrame(draw);
+
+if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__hado = seq;
