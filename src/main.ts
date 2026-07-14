@@ -22,8 +22,8 @@ const state = {
   // LIQUID — resonant squelch driven by a natural function
   liquid: 0.08, liqSource: "LSYS" as NatureSource, liqBase: 480, liqDepth: 900, liqQ: 11,
   liqRate: 0.5, liqDelay: 0.05, liqDelayMod: 0.4, liqFb: 0.4,
-  // 自動展開 (auto-arranger)
-  arrangeOn: false, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5,
+  // 自動展開 (auto-arranger) — on by default: stage arc + density ebb/flow + random breaks
+  arrangeOn: true, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5, arrangeBreak: 0.25,
   // リズム自動変化 (continuous drift, on by default)
   varyOn: true, varyAmt: 0.35, varyBars: 2,
   // MOD LFOs — major params auto-evolve via natural functions instead of staying fixed
@@ -103,7 +103,7 @@ const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
 let prevBar = -1, barCount = 0;
 const arrangeOpts = (): ArrangeOpts => ({
   on: state.arrangeOn, engine: state.arrangeEngine, sectionBars: state.sectionBars,
-  intensity: state.arrangeIntensity, stages: state.arrangeStages,
+  intensity: state.arrangeIntensity, stages: state.arrangeStages, breakProb: state.arrangeBreak,
 });
 
 // リズム自動変化 — small per-bar drift of rotation / density so the groove keeps evolving
@@ -196,6 +196,7 @@ const grooveTag = el("span", "tag");
 const randBtn = el("button", undefined, "⤨ RANDOM");
 randBtn.addEventListener("click", randomize);
 const autoBtn = el("button", "auto", "⟳ AUTO");
+if (state.arrangeOn) autoBtn.classList.add("on");
 autoBtn.addEventListener("click", () => {
   state.arrangeOn = !state.arrangeOn;
   autoBtn.classList.toggle("on", state.arrangeOn);
@@ -399,6 +400,7 @@ function buildGlobals(): void {
     slider("SECTION", 1, 16, 1, state.sectionBars, (v) => v + "bar", (v) => { state.sectionBars = v; }),
     slider("INTENSITY", 0, 1, 0.05, state.arrangeIntensity, (v) => v.toFixed(2), (v) => { state.arrangeIntensity = v; }),
     slider("STAGES", 2, 8, 1, state.arrangeStages, (v) => String(v), (v) => { state.arrangeStages = v; }),
+    slider("BREAK", 0, 1, 0.05, state.arrangeBreak, (v) => v.toFixed(2), (v) => { state.arrangeBreak = v; }),
     slider("VARY AMT", 0, 1, 0.05, state.varyAmt, (v) => v.toFixed(2), (v) => { state.varyAmt = v; }),
     slider("VARY BARS", 1, 8, 1, state.varyBars, (v) => v + "bar", (v) => { state.varyBars = v; }),
     el("div", "tag", "· MOD LFO 自動展開 ·"),
@@ -433,7 +435,7 @@ function buildGlobals(): void {
     "MOD LFO 自動展開: 各LFOに対象パラメータ(density/gateThresh/subTune/clickTone/rollRate/liqBase等)と自然関数SOURCEを割当て、固定でなく自動で揺れ動かす。depth=変化幅。<br>" +
     "SETTINGS: ＋SAVE で名前付きプリセット保存、選択で読込、EXPORT/IMPORT で JSON 入出力(ブラウザに永続)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
-    "AUTO 自動展開: L-system/フィロタキシス/ロジスティック写像/場(|ψ|²) の自然関数が SECTION 小節ごとにパターンを再生成し、STAGES 段のアークで展開(INTENSITY=変化の強さ)。<br>" +
+    "AUTO 自動展開: 5段アーク(序章→build→full→ブリッジ→finale)で音数が増減し、SECTIONごとに自然関数エンジンがパターン再生成。BREAK=ランダムにブレイクビーツが割り込む確率。既定ON。<br>" +
     "VARY リズム自動変化: VARY BARS 小節ごとに各音色の回転/密度を少しずつドリフト(VARY AMT=強さ)。AUTOより控えめで常時変化。<br>" +
     "LIQUID: 高レゾ共鳴フィルタ＋変調ディレイのねちょっとした経路。SOURCE の自然関数(LSYS/LOGISTIC/KURAMOTO/FIELD/SINE)がフィルタを有機的に動かす。BASE/DEPTH/Q/RATE/DELAY/FEEDBACK で追い込み。";
   g.appendChild(hint);
@@ -578,4 +580,4 @@ function drawGrid(): void {
 
 requestAnimationFrame(draw);
 
-if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__hado = seq;
+if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__hado = { seq, state, arr: arranger };

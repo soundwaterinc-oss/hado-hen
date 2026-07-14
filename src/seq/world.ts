@@ -45,6 +45,14 @@ const RAW: Record<string, string> = {
   "Gamelan sangsih": "..x...x...x...x.",
   "Gong cycle (16)": "x.......x...x...",
   "Kecak (cak)":     "x.xx.x.xx.x.xx.x",
+  // ---- breakbeat kit cells (used by the auto-arranger's random breaks; also pickable) ----
+  "Break kick 1":     "x..x...x..x.....",
+  "Break kick 2":     "x.....x.x...x..x",
+  "Break snare":      "....x.......x...",
+  "Break snare ghost":"....x..x....x.x.",
+  "Break hat":        "x.x.x.x.x.x.x.x.",
+  "Break hat 16":     "x.xxx.xxx.xxx.xx",
+  "Break ghost":      "..x..x..x..x..x.",
 };
 
 export const WORLD_PATTERNS: Record<string, boolean[]> = {};
