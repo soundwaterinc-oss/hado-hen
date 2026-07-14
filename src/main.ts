@@ -11,9 +11,9 @@ import { el, slider, select } from "./ui/controls";
 const state = {
   bpm: 132, swing: 0.0, humanize: 0.0015, accent: 0.5,
   master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
-  subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45,
+  subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.6,
   grooveName: "7+5+9",
-  level: { kick: 1.0, sub: 0.85, drag: 0.8, knock: 0.7, roll: 1.0, click: 0.65, tick: 0.5, noise: 0.45, beep: 0 } as Record<Lane, number>,
+  level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.6, knock: 0.7, roll: 1.0, click: 0.65, tick: 0.5, noise: 0.45, beep: 0 } as Record<Lane, number>,
 };
 
 // Audio is created lazily on the first PLAY click (inside the user gesture). If audio
@@ -36,7 +36,7 @@ const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
 function voiceParams(): VoiceParams {
   return {
     master: state.master, subTune: state.subTune, kickDrive: state.kickDrive,
-    clickTone: state.clickTone, beepTone: state.beepTone, rollRate: state.rollRate, level: state.level,
+    clickTone: state.clickTone, beepTone: state.beepTone, rollRate: state.rollRate, susLen: state.susLen, level: state.level,
   };
 }
 function engineParams(): EngineParams {
@@ -131,6 +131,7 @@ function buildGlobals(): void {
     slider("CLICK TONE", 600, 6000, 50, state.clickTone, (v) => v + "Hz", (v) => { state.clickTone = v; }),
     slider("BEEP TONE", 220, 3000, 10, state.beepTone, (v) => v + "Hz", (v) => { state.beepTone = v; }),
     slider("ROLL BUZZ", 25, 150, 1, state.rollRate, (v) => v + "Hz", (v) => { state.rollRate = v; }),
+    slider("SUS LEN", 0.15, 1.6, 0.05, state.susLen, (v) => v.toFixed(2) + "s", (v) => { state.susLen = v; }),
     el("div", "tag", "· MASTER ·"),
     slider("LOW BOOST", 0, 10, 0.5, state.lowBoost, (v) => "+" + v + "dB", (v) => { state.lowBoost = v; }),
     slider("DRIVE", 0, 1, 0.05, state.drive, (v) => v.toFixed(2), (v) => { state.drive = v; }),
@@ -143,7 +144,8 @@ function buildGlobals(): void {
     "DOWNBEAT: 各グループ頭 / EUCLID: 小節長に均等 k 発音 / POLY: 独立周期 len で位相ずれ。<br>" +
     "重い低域は KICK(hard-clip)+SUB+LOW BOOST、ドット感は CLICK/TICK/BEEP。<br>" +
     "ROLL = ずずずず…のバズロール(連符)。ROLL BUZZ でざらつきの速さを調整。<br>" +
-    "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。";
+    "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。<br>" +
+    "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。";
   g.appendChild(hint);
 }
 

@@ -2,8 +2,8 @@
 // hard-clipped knocks, and a heavy, tight low end. Everything is short, dry and precise
 // (dot感). No melody, no sustain pads — just the grid made audible.
 
-export type Lane = "kick" | "sub" | "drag" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
-export const LANES: Lane[] = ["kick", "sub", "drag", "knock", "roll", "click", "tick", "noise", "beep"];
+export type Lane = "kick" | "sub" | "drag" | "sus" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
+export const LANES: Lane[] = ["kick", "sub", "drag", "sus", "knock", "roll", "click", "tick", "noise", "beep"];
 
 export interface VoiceParams {
   master: number;
@@ -12,6 +12,7 @@ export interface VoiceParams {
   clickTone: number;   // Hz, click centre
   beepTone: number;    // Hz, pure test-tone dot
   rollRate: number;    // Hz, buzz gate rate of the roll (ずずずず)
+  susLen: number;      // sec, sustain length of the SUS low tone
   level: Record<Lane, number>;
 }
 
@@ -65,6 +66,7 @@ export class Voices {
       case "kick":  return this.kick(time, lvl, p, panPos);
       case "sub":   return this.subVoice(time, lvl, p, panPos);
       case "drag":  return this.drag(time, lvl, p, panPos);
+      case "sus":   return this.sus(time, lvl, p, panPos);
       case "knock": return this.knock(time, lvl, p, panPos);
       case "roll":  return this.roll(time, lvl, p, panPos);
       case "click": return this.click(time, lvl, p, panPos);
@@ -94,19 +96,51 @@ export class Voices {
     osc.start(time); osc.stop(time + dur + 0.05);
   }
 
-  // SUB — pure deep sine, longer, no drive: fills and holds the low end under the grid.
+  // SUB — click/knock-leaning low hit: a very sharp pitch-snap sine through a hard clip,
+  // short body, plus a bandpassed noise click on top for percussive knock definition.
   private subVoice(time: number, lvl: number, p: VoiceParams, pan: number): void {
     const ctx = this.ctx;
-    const f = p.subTune * 0.5;
-    const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = f;
-    const dur = 0.26;
+    const f = p.subTune;
+    const osc = ctx.createOscillator(); osc.type = "sine";
+    osc.frequency.setValueAtTime(f * 4.6, time);              // high snap → clicky attack
+    osc.frequency.exponentialRampToValueAtTime(f, time + 0.016);
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = clipCurve(0.5 + p.kickDrive * 0.5); shaper.oversample = "4x";
+    const dur = 0.11;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(lvl * 1.8, time + 0.004);
+    g.gain.linearRampToValueAtTime(lvl * 1.7, time + 0.0005);
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
     const pn = this.pan(pan * 0.15);
-    osc.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.start(time); osc.stop(time + dur + 0.03);
+    // noise click transient → knock definition
+    const nz = this.noiseSrc(time, 0.004);
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 1700; bp.Q.value = 2;
+    const ng = this.pluck(time, 0.004, lvl * 0.55);
+    nz.connect(bp); bp.connect(ng); ng.connect(pn);
+  }
+
+  // SUS — long sustained deep sub (an octave below): attack, hold plateau, then release.
+  // A drone-ish low that rings under the grid. Length set by SUS LEN.
+  private sus(time: number, lvl: number, p: VoiceParams, pan: number): void {
+    const ctx = this.ctx;
+    const f = p.subTune * 0.5;
+    const dur = Math.max(0.12, p.susLen);
+    const a = Math.min(0.03, dur * 0.12);
+    const r = Math.min(0.25, dur * 0.45);
+    const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = f;
+    const osc2 = ctx.createOscillator(); osc2.type = "triangle"; osc2.frequency.value = f * 2;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(lvl * 1.5, time + a);
+    g.gain.setValueAtTime(lvl * 1.5, time + Math.max(a, dur - r));
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    const g2 = ctx.createGain(); g2.gain.value = 0.22;
+    const pn = this.pan(pan * 0.1);
+    osc.connect(g); osc2.connect(g2); g2.connect(g); g.connect(pn); pn.connect(this.out);
     osc.start(time); osc.stop(time + dur + 0.05);
+    osc2.start(time); osc2.stop(time + dur + 0.05);
   }
 
   // DRAG — sub-kick that "引きずる": a deep sine whose pitch glides downward over the hit
