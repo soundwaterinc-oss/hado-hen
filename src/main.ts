@@ -3,30 +3,45 @@
 import "./style.css";
 import { AudioEngine, type EngineParams } from "./audio/engine";
 import { type Lane, LANES, type VoiceParams } from "./audio/voices";
-import { Sequencer, laneHit, METERS, FOLLOW, type LaneMode, type SeqParams } from "./seq/sequencer";
+import { Sequencer, laneHit, METERS, FOLLOW, type LaneMode, type SeqParams, type GateMode } from "./seq/sequencer";
 import { GROOVES, type Groove } from "./seq/meter";
+import { QuantumField } from "./field/field";
 import { el, slider, select } from "./ui/controls";
 
 // ---- state -----------------------------------------------------------------
 const state = {
   bpm: 132, swing: 0.0, humanize: 0.0006, accent: 0.5,
-  master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
+  master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0, liquid: 0.16,
   subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.45,
+  // HADŌ quantum field
+  gateMode: "OR" as GateMode, gateThresh: 0.3, density: 0.35, fieldAmt: 0.5, fieldSpeed: 1.0, fieldExcite: 0.7,
   grooveName: "7+5+9",
   level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.72, knock: 0.7, roll: 1.0, click: 0.74, tick: 0.66, noise: 0.5, beep: 0.3 } as Record<Lane, number>,
 };
+
+const field = new QuantumField(128);
 
 // Audio is created lazily on the first PLAY click (inside the user gesture). If audio
 // init fails on a device, the whole UI still renders — the play button always appears.
 let engine: AudioEngine | null = null;
 let freqData: Uint8Array<ArrayBuffer> | null = null;
 let timeData: Uint8Array<ArrayBuffer> | null = null;
-const seqParams = (): SeqParams => ({ bpm: state.bpm, swing: state.swing, humanize: state.humanize, accent: state.accent });
+const seqParams = (): SeqParams => ({
+  bpm: state.bpm, swing: state.swing, humanize: state.humanize, accent: state.accent,
+  gateMode: state.gateMode, gateThresh: state.gateThresh, density: state.density, fieldAmt: state.fieldAmt,
+});
 
 let curBar = 0, flash = 0;
 const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
   now: () => (engine ? engine.now : 0),
-  fire: (lane, time, vel, pan) => engine?.voices.trigger(lane, time, vel, voiceParams(), pan),
+  fire: (lane, time, vel, pan) => {
+    engine?.voices.trigger(lane, time, vel, voiceParams(), pan);
+    // low-end hits excite the field → 拍 that stirs the 波動
+    if (lane === "kick" || lane === "sub" || lane === "drag") {
+      field.excite(0.5 + (Math.random() * 2 - 1) * 0.2, state.fieldExcite * vel, 4 + Math.random() * 4);
+    }
+  },
+  probe: (pos01) => field.probe(pos01),
   onStep: (bi, _ui, _units, isDown, _time) => {
     curBar = bi;
     if (isDown) flash = 1;
@@ -40,7 +55,7 @@ function voiceParams(): VoiceParams {
   };
 }
 function engineParams(): EngineParams {
-  return { master: state.master, drive: state.drive, lowBoost: state.lowBoost, reverbMix: state.reverbMix };
+  return { master: state.master, drive: state.drive, lowBoost: state.lowBoost, reverbMix: state.reverbMix, liquid: state.liquid };
 }
 
 // ---- UI --------------------------------------------------------------------
@@ -127,6 +142,13 @@ function buildLane(lane: Lane): void {
   laneRows.appendChild(row);
 }
 
+function fieldModeCtl(): HTMLElement {
+  const wrap = el("div", "ctl");
+  wrap.appendChild(el("label", undefined, "GATE MODE"));
+  wrap.appendChild(select(["MANUAL", "QUANTUM", "AND", "OR"], state.gateMode, (v) => { state.gateMode = v as GateMode; }));
+  return wrap;
+}
+
 function buildGlobals(): void {
   const g = globalPanel;
   g.append(
@@ -141,9 +163,17 @@ function buildGlobals(): void {
     slider("BEEP TONE", 220, 3000, 10, state.beepTone, (v) => v + "Hz", (v) => { state.beepTone = v; }),
     slider("ROLL BUZZ", 25, 150, 1, state.rollRate, (v) => v + "Hz", (v) => { state.rollRate = v; }),
     slider("SUS LEN", 0.15, 1.6, 0.05, state.susLen, (v) => v.toFixed(2) + "s", (v) => { state.susLen = v; }),
+    el("div", "tag", "· HADŌ FIELD |ψ|² ·"),
+    fieldModeCtl(),
+    slider("GATE THRESH", 0, 1, 0.02, state.gateThresh, (v) => v.toFixed(2), (v) => { state.gateThresh = v; }),
+    slider("DENSITY", 0, 1, 0.05, state.density, (v) => v.toFixed(2), (v) => { state.density = v; }),
+    slider("FIELD→VEL", 0, 1, 0.05, state.fieldAmt, (v) => v.toFixed(2), (v) => { state.fieldAmt = v; }),
+    slider("FIELD SPEED", 0.1, 3, 0.1, state.fieldSpeed, (v) => v.toFixed(1), (v) => { state.fieldSpeed = v; }),
+    slider("EXCITE", 0, 2, 0.05, state.fieldExcite, (v) => v.toFixed(2), (v) => { state.fieldExcite = v; }),
     el("div", "tag", "· MASTER ·"),
     slider("LOW BOOST", 0, 10, 0.5, state.lowBoost, (v) => "+" + v + "dB", (v) => { state.lowBoost = v; }),
     slider("DRIVE", 0, 1, 0.05, state.drive, (v) => v.toFixed(2), (v) => { state.drive = v; }),
+    slider("LIQUID", 0, 1, 0.02, state.liquid, (v) => v.toFixed(2), (v) => { state.liquid = v; }),
     slider("ROOM", 0, 0.5, 0.02, state.reverbMix, (v) => v.toFixed(2), (v) => { state.reverbMix = v; }),
     slider("MASTER", 0, 1.2, 0.05, state.master, (v) => v.toFixed(2), (v) => { state.master = v; }),
   );
@@ -155,7 +185,9 @@ function buildGlobals(): void {
     "ROLL = ずずずず…のバズロール(連符)。ROLL BUZZ でざらつきの速さを調整。<br>" +
     "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。<br>" +
     "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。<br>" +
-    "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。";
+    "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。<br>" +
+    "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
+    "LIQUID: 共鳴フィルタが蠢くねちょっとしたリキッド感を少量ブレンド。";
   g.appendChild(hint);
 }
 
@@ -179,18 +211,36 @@ function randomize(): void {
 // ---- render loop -----------------------------------------------------------
 const sctx = scope.getContext("2d")!;
 const gctx = gridC.getContext("2d")!;
+let lastT = performance.now();
 
 function draw(): void {
+  const t = performance.now();
+  const dt = Math.min(0.05, (t - lastT) / 1000); lastT = t;
+  field.step(dt, state.fieldSpeed); // HADŌ field always evolves
   seq.schedule();
   if (engine) engine.apply(engineParams());
   flash *= 0.86;
   grooveTag.textContent = `${state.grooveName} · bar ${curBar + 1}/${seq.groove.length}`;
 
-  // dot scope — Ikeda: sparse points from the time-domain signal (once audio is live)
+  // scope — HADŌ |ψ|² wave field + Ikeda dots of the audio signal
   sctx.fillStyle = "#000"; sctx.fillRect(0, 0, scope.width, scope.height);
+  // field: filled probability density curve
+  sctx.fillStyle = "#141414"; sctx.beginPath(); sctx.moveTo(0, scope.height);
+  for (let i = 0; i < field.N; i++) {
+    const x = (i / (field.N - 1)) * scope.width;
+    const y = scope.height - Math.min(1, field.mag[i]) * scope.height * 0.92;
+    sctx.lineTo(x, y);
+  }
+  sctx.lineTo(scope.width, scope.height); sctx.closePath(); sctx.fill();
+  sctx.strokeStyle = "#3a3a3a"; sctx.lineWidth = 1; sctx.beginPath();
+  for (let i = 0; i < field.N; i++) {
+    const x = (i / (field.N - 1)) * scope.width;
+    const y = scope.height - Math.min(1, field.mag[i]) * scope.height * 0.92;
+    i ? sctx.lineTo(x, y) : sctx.moveTo(x, y);
+  }
+  sctx.stroke();
   if (engine && freqData && timeData) {
     engine.analyser.getByteTimeDomainData(timeData);
-    engine.analyser.getByteFrequencyData(freqData);
     sctx.fillStyle = "#fff";
     const N = timeData.length, step = 4;
     for (let i = 0; i < N; i += step) {
@@ -198,14 +248,9 @@ function draw(): void {
       const y = (timeData[i] / 255) * scope.height;
       sctx.fillRect(x, y, 1.5, 1.5);
     }
-    // low-end meter bar (bottom): mean of low bins → shows the weight
-    let low = 0; const nb = 24;
-    for (let i = 0; i < nb; i++) low += freqData[i];
-    low = low / nb / 255;
-    sctx.fillRect(0, scope.height - 3, low * scope.width, 3);
   } else {
-    sctx.fillStyle = "#444"; sctx.font = "11px monospace"; sctx.textBaseline = "middle";
-    sctx.fillText("press ▶ PLAY to start audio", 12, scope.height / 2);
+    sctx.fillStyle = "#555"; sctx.font = "11px monospace"; sctx.textBaseline = "middle";
+    sctx.fillText("press ▶ PLAY to start audio", 12, 14);
   }
 
   drawGrid();

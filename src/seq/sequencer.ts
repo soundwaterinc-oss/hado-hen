@@ -36,16 +36,23 @@ export const DEFAULT_LANES: Record<Lane, LaneCfg> = {
   beep:  { meter: FOLLOW, mode: "POLY",     k: 1, len: 12, rot: 5, prob: 0.8 },
 };
 
+export type GateMode = "MANUAL" | "QUANTUM" | "AND" | "OR";
+
 export interface SeqParams {
   bpm: number;
-  swing: number;     // 0..1 push of odd units
-  humanize: number;  // seconds of jitter
-  accent: number;    // 0..1 extra velocity on downbeats
+  swing: number;      // 0..1 push of odd units
+  humanize: number;   // seconds of jitter
+  accent: number;     // 0..1 extra velocity on downbeats
+  gateMode: GateMode; // how the quantum field |ψ|² combines with the meter hits
+  gateThresh: number; // 0..1 |ψ|² threshold that opens the quantum gate
+  density: number;    // 0..1 probability a quantum-gated slot actually fires
+  fieldAmt: number;   // 0..1 how much |ψ|² modulates velocity
 }
 
 export interface SeqDeps {
   now: () => number;
   fire: (lane: Lane, time: number, vel: number, pan: number) => void;
+  probe: (pos01: number) => number; // |ψ|² of the HADŌ field at a lane's probe position
   onStep: (barIndex: number, unitInBar: number, units: number, isDownbeat: boolean, time: number) => void;
 }
 
@@ -127,6 +134,10 @@ export class Sequencer {
     const i = LANES.indexOf(lane);
     return ((i / (LANES.length - 1)) * 2 - 1) * 0.55;
   }
+  // each lane samples the field at a spread-out probe position
+  private laneProbePos(lane: Lane): number {
+    return LANES.indexOf(lane) / (LANES.length - 1);
+  }
 
   schedule(): void {
     if (!this.running) return;
@@ -149,14 +160,30 @@ export class Sequencer {
 
     for (const lane of LANES) {
       const c = this.lanes[lane];
+      if (c.mode === "OFF") continue;
       const e = this.entryFor(lane, gu);
-      if (!laneHit(c, e.units, e.downs, e.unitInBar, gu)) continue;
+      const manual = laneHit(c, e.units, e.downs, e.unitInBar, gu);
+
+      // HADŌ quantum gate: |ψ|² at this lane's probe opens the gate
+      const mag = this.deps.probe(this.laneProbePos(lane));
+      const gateOpen = mag >= p.gateThresh;
+      const quantum = gateOpen && Math.random() < p.density;
+      let hit = false;
+      switch (p.gateMode) {
+        case "MANUAL": hit = manual; break;
+        case "QUANTUM": hit = quantum; break;
+        case "AND": hit = manual && gateOpen; break;
+        case "OR": hit = manual || quantum; break;
+      }
+      if (!hit) continue;
       if (Math.random() > c.prob) continue;
+
       const human = (Math.random() * 2 - 1) * p.humanize;
-      // accent on the lane's OWN downbeats / bar start
+      // accent on the lane's OWN downbeats / bar start, then modulated by the field
       let vel = 0.62;
-      if (e.downs.has(e.unitInBar)) vel = Math.min(1, 0.78 + p.accent * 0.3);
-      if (e.unitInBar === 0) vel = Math.min(1, 0.9 + p.accent * 0.1);
+      if (e.downs.has(e.unitInBar)) vel = 0.78 + p.accent * 0.3;
+      if (e.unitInBar === 0) vel = 0.9 + p.accent * 0.1;
+      vel = Math.min(1, vel * (1 - p.fieldAmt + p.fieldAmt * (0.4 + 0.9 * mag)));
       this.deps.fire(lane, baseTime + swing + human, vel, this.lanePan(lane));
     }
   }
