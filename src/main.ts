@@ -3,10 +3,10 @@
 import "./style.css";
 import { AudioEngine, type EngineParams } from "./audio/engine";
 import { type Lane, LANES, type VoiceParams } from "./audio/voices";
-import { Sequencer, laneHit, METERS, FOLLOW, type LaneMode, type SeqParams, type GateMode } from "./seq/sequencer";
+import { Sequencer, METERS, FOLLOW, type LaneMode, type Combine, type Layer, type SeqParams, type GateMode } from "./seq/sequencer";
 import { GROOVES, type Groove } from "./seq/meter";
 import { QuantumField } from "./field/field";
-import { WORLD_NAMES } from "./seq/world";
+import { WORLD_NAMES, DEFAULT_WORLD } from "./seq/world";
 import { NatureMod, NATURE_SOURCES, type NatureSource } from "./seq/nature";
 import { Arranger, ARRANGE_ENGINES, type ArrangeEngine, type ArrangeOpts } from "./seq/arranger";
 import { el, slider, select } from "./ui/controls";
@@ -24,7 +24,7 @@ const state = {
   // 自動展開 (auto-arranger)
   arrangeOn: false, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5,
   grooveName: "7+5+9",
-  level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.72, knock: 0.7, roll: 1.0, click: 0.74, tick: 0.66, noise: 0.5, beep: 0.3 } as Record<Lane, number>,
+  level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.72, cak: 0.7, knock: 0.7, roll: 1.0, click: 0.74, tick: 0.66, noise: 0.5, beep: 0.3 } as Record<Lane, number>,
 };
 
 const field = new QuantumField(128);
@@ -145,7 +145,17 @@ function snapshot(): Settings {
 function applySettings(s: Settings | undefined): void {
   if (!s || !s.state) return;
   Object.assign(state, s.state);
-  if (s.lanes) for (const k of LANES) if (s.lanes[k]) Object.assign(seq.lanes[k], s.lanes[k]);
+  if (s.lanes) for (const k of LANES) {
+    const sv = s.lanes[k] as unknown as (typeof seq.lanes[Lane] & { mode?: LaneMode; meter?: string; k?: number; len?: number; rot?: number; pattern?: string });
+    if (!sv) continue;
+    if (Array.isArray(sv.layers)) { seq.lanes[k].layers = sv.layers as Layer[]; seq.lanes[k].combine = sv.combine ?? "OR"; seq.lanes[k].prob = sv.prob ?? 1; }
+    else { // backward-compat: wrap an old flat lane config into a single layer
+      seq.lanes[k] = {
+        layers: [{ mode: sv.mode ?? "EUCLID", meter: sv.meter ?? FOLLOW, k: sv.k ?? 4, len: sv.len ?? 8, rot: sv.rot ?? 0, pattern: sv.pattern ?? DEFAULT_WORLD }],
+        combine: "OR", prob: sv.prob ?? 1,
+      };
+    }
+  }
   if (!GROOVES[state.grooveName]) state.grooveName = Object.keys(GROOVES)[0];
   seq.setGroove(GROOVES[state.grooveName] as Groove);
   grooveSel.value = state.grooveName;
@@ -195,7 +205,7 @@ refreshPresetSel();
 // canvases
 const canvases = el("div", "canvases");
 const scope = el("canvas"); scope.width = 1088; scope.height = 130;
-const gridC = el("canvas"); gridC.width = 1088; gridC.height = 240;
+const gridC = el("canvas"); gridC.width = 1088; gridC.height = 264;
 canvases.append(scope, gridC);
 app.appendChild(canvases);
 
@@ -227,25 +237,44 @@ function rebuildGlobals(): void {
 
 function buildLane(lane: Lane): void {
   const c = seq.lanes[lane];
-  const row = el("div", "lane");
-  row.append(el("span", "name", lane));
-  const meterSel = select(METERS, c.meter, (v) => { c.meter = v; }, "mtr");
-  row.appendChild(meterSel);
-  const modeSel = select(MODES, c.mode, (v) => { c.mode = v as LaneMode; }, undefined);
-  row.appendChild(modeSel);
-  const sliders = el("div", "sliders");
-  // world rhythm cell — picking one switches the lane to WORLD mode
-  const worldSel = select(WORLD_NAMES, c.pattern, (v) => { c.pattern = v; c.mode = "WORLD"; rebuildLanes(); }, "world");
-  sliders.append(
-    worldSel,
-    slider("k", 0, 16, 1, c.k, (v) => String(v), (v) => { c.k = v; }),
-    slider("len", 1, 16, 1, c.len, (v) => String(v), (v) => { c.len = v; }),
-    slider("rot", 0, 15, 1, c.rot, (v) => String(v), (v) => { c.rot = v; }),
-    slider("prob", 0, 1, 0.05, c.prob, (v) => v.toFixed(2), (v) => { c.prob = v; }),
-    slider("lvl", 0, 1.2, 0.05, state.level[lane], (v) => v.toFixed(2), (v) => { state.level[lane] = v; }),
-  );
-  row.appendChild(sliders);
-  laneRows.appendChild(row);
+  const block = el("div", "lane");
+
+  // header: name · combine · prob · level · [+ layer]
+  const head = el("div", "lanehead");
+  head.append(el("span", "name", lane));
+  head.append(el("span", "tag", "mix"));
+  head.append(select(["OR", "AND", "XOR"], c.combine, (v) => { c.combine = v as Combine; }, "mode"));
+  head.append(slider("prob", 0, 1, 0.05, c.prob, (v) => v.toFixed(2), (v) => { c.prob = v; }));
+  head.append(slider("lvl", 0, 1.2, 0.05, state.level[lane], (v) => v.toFixed(2), (v) => { state.level[lane] = v; }));
+  const addBtn = el("button", "tiny", "＋layer");
+  addBtn.addEventListener("click", () => {
+    if (c.layers.length < 3) { c.layers.push({ mode: "EUCLID", meter: FOLLOW, k: 4, len: 8, rot: 0, pattern: DEFAULT_WORLD }); rebuildLanes(); }
+  });
+  head.append(addBtn);
+  block.append(head);
+
+  // one row per parallel layer
+  c.layers.forEach((layer, li) => {
+    const row = el("div", "layer");
+    row.append(select(MODES, layer.mode, (v) => { layer.mode = v as LaneMode; }, "mode"));
+    row.append(select(METERS, layer.meter, (v) => { layer.meter = v; }, "mtr"));
+    // picking a world cell switches this layer to WORLD
+    row.append(select(WORLD_NAMES, layer.pattern, (v) => { layer.pattern = v; layer.mode = "WORLD"; rebuildLanes(); }, "world"));
+    const sliders = el("div", "sliders");
+    sliders.append(
+      slider("k", 0, 16, 1, layer.k, (v) => String(v), (v) => { layer.k = v; }),
+      slider("len", 1, 16, 1, layer.len, (v) => String(v), (v) => { layer.len = v; }),
+      slider("rot", 0, 15, 1, layer.rot, (v) => String(v), (v) => { layer.rot = v; }),
+    );
+    row.append(sliders);
+    if (c.layers.length > 1) {
+      const del = el("button", "tiny", "×");
+      del.addEventListener("click", () => { c.layers.splice(li, 1); rebuildLanes(); });
+      row.append(del);
+    }
+    block.append(row);
+  });
+  laneRows.appendChild(block);
 }
 
 function labeledSelect(label: string, options: string[], value: string, onChange: (v: string) => void): HTMLElement {
@@ -306,7 +335,8 @@ function buildGlobals(): void {
     "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。<br>" +
     "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。<br>" +
     "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。<br>" +
-    "WORLD リズム: 各レーンのパターン選択で世界の民族リズム(クラーベ/ベンベ/マクスーム/サンバ等)を割当(mode=WORLD)。異なる伝統が重なり位相する。<br>" +
+    "WORLD リズム: パターン選択で世界の民族リズム(クラーベ/ベンベ/マクスーム/サンバ/Gnawa/Gamelan/Kecak等)を割当(mode=WORLD)。<br>" +
+    "並列混在: ＋layer で各音色に別パターンを重ねられる(最大3層)。mix=OR(和)/AND(積)/XOR(排他)で合成。CAK=ケチャ声。<br>" +
     "SETTINGS: ＋SAVE で名前付きプリセット保存、選択で読込、EXPORT/IMPORT で JSON 入出力(ブラウザに永続)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
     "AUTO 自動展開: L-system/フィロタキシス/ロジスティック写像/場(|ψ|²) の自然関数が SECTION 小節ごとにパターンを再生成し、STAGES 段のアークで展開(INTENSITY=変化の強さ)。<br>" +
@@ -319,16 +349,26 @@ function randomize(): void {
   state.grooveName = names[Math.floor(Math.random() * names.length)];
   seq.setGroove(GROOVES[state.grooveName] as Groove);
   grooveSel.value = state.grooveName;
+  const rMeter = (): string => Math.random() < 0.55 ? METERS[1 + Math.floor(Math.random() * (METERS.length - 1))] : FOLLOW;
   for (const lane of LANES) {
     const c = seq.lanes[lane];
     if (lane === "beep") continue;
-    // ~55% of the time give the voice its OWN odd meter → polymeter scatter
-    c.meter = Math.random() < 0.55 ? METERS[1 + Math.floor(Math.random() * (METERS.length - 1))] : FOLLOW;
-    c.k = 1 + Math.floor(Math.random() * 7);
-    c.len = 4 + Math.floor(Math.random() * 9);
-    c.rot = Math.floor(Math.random() * 8);
+    const l0 = c.layers[0];
+    l0.meter = rMeter();
+    l0.k = 1 + Math.floor(Math.random() * 7);
+    l0.len = 4 + Math.floor(Math.random() * 9);
+    l0.rot = Math.floor(Math.random() * 8);
+    // ~40% of voices get a second parallel layer (often a world cell) → 混在
+    if (Math.random() < 0.4) {
+      c.layers[1] = Math.random() < 0.6
+        ? { mode: "WORLD", meter: rMeter(), k: l0.k, len: l0.len, rot: 0, pattern: WORLD_NAMES[Math.floor(Math.random() * WORLD_NAMES.length)] }
+        : { mode: Math.random() < 0.5 ? "POLY" : "EUCLID", meter: rMeter(), k: 1 + Math.floor(Math.random() * 6), len: 3 + Math.floor(Math.random() * 9), rot: Math.floor(Math.random() * 8), pattern: DEFAULT_WORLD };
+      c.layers.length = 2;
+    } else {
+      c.layers.length = 1;
+    }
   }
-  rebuildLanes(); // reflect randomized meter/k/len/rot in the controls
+  rebuildLanes(); // reflect randomized layers in the controls
 }
 
 // ---- render loop -----------------------------------------------------------
@@ -397,15 +437,16 @@ function drawGrid(): void {
   for (let r = 0; r < rows.length; r++) {
     const lane = rows[r];
     const c = seq.lanes[lane];
-    const e = seq.entryFor(lane, gu);
+    const prime = c.layers[0];
+    const e = seq.entryForMeter(prime.meter, gu); // row window = primary layer's meter
     const units = e.units, downs = e.downs, curU = e.unitInBar;
     const barStart = gu - curU;
     const y = padT + r * cellH + cellH / 2;
     const cellW = (W - padL - 8) / units;
 
-    // labels: lane name + chosen meter
-    gctx.fillStyle = "#999"; gctx.fillText(lane, 4, y - 4);
-    const mLabel = c.meter === FOLLOW ? "follow" : c.meter.replace(/\s*\(.*\)/, "");
+    // labels: lane name + primary meter (+ layer count if mixed)
+    gctx.fillStyle = "#999"; gctx.fillText(lane + (c.layers.length > 1 ? " ×" + c.layers.length : ""), 4, y - 4);
+    const mLabel = prime.meter === FOLLOW ? "follow" : prime.meter.replace(/\s*\(.*\)/, "");
     gctx.fillStyle = "#555"; gctx.fillText(mLabel, 4, y + 6);
 
     // group boundaries within this lane's bar
@@ -420,9 +461,9 @@ function drawGrid(): void {
       gctx.fillStyle = "rgba(255,255,255,0.10)";
       gctx.fillRect(padL + curU * cellW, y - cellH / 2 + 2, cellW, cellH - 4);
     }
-    // hit dots — same rule the scheduler uses (POLY needs the absolute unit)
+    // hit dots — combined parallel layers, same rule the scheduler uses
     for (let u = 0; u < units; u++) {
-      if (!laneHit(c, units, downs, u, barStart + u)) continue;
+      if (!seq.laneHitAt(lane, barStart + u)) continue;
       const x = padL + u * cellW + cellW / 2;
       const live = u === curU && seq.running;
       const sz = live ? 4.2 : (downs.has(u) ? 3 : 2.2);

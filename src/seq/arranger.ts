@@ -5,6 +5,7 @@
 import { LANES } from "../audio/voices";
 import { METERS, FOLLOW, type LaneMode } from "./sequencer";
 import type { Sequencer } from "./sequencer";
+import { WORLD_NAMES } from "./world";
 import { lsysCurve, phyllotaxis, logisticNext } from "./nature";
 
 export type ArrangeEngine = "LSYSTEM" | "PHYLLOTAXIS" | "LOGISTIC" | "FIELD";
@@ -51,9 +52,10 @@ export class Arranger {
       const anchor = lane === "kick"; // keep the downbeat anchor steady
       if (anchor) return;
 
+      const l0 = c.layers[0];
       const cv = curve[(i * 3 + s) % curve.length];
       const cv2 = curve[(i * 5 + s * 2 + 1) % curve.length];
-      let mode: LaneMode = c.mode, k = c.k, len = c.len, rot = c.rot, meter = c.meter;
+      let mode: LaneMode = l0.mode, k = l0.k, len = l0.len, rot = l0.rot, meter = l0.meter;
 
       switch (o.engine) {
         case "LSYSTEM":
@@ -92,11 +94,22 @@ export class Arranger {
         }
       }
 
-      c.mode = mode;
-      c.k = Math.max(0, Math.min(16, k));
-      c.len = Math.max(1, Math.min(16, len));
-      c.rot = Math.max(0, Math.min(15, rot));
-      if (Math.random() < inten * 0.5) c.meter = meter; // occasionally re-meter
+      l0.mode = mode;
+      l0.k = Math.max(0, Math.min(16, k));
+      l0.len = Math.max(1, Math.min(16, len));
+      l0.rot = Math.max(0, Math.min(15, rot));
+      if (Math.random() < inten * 0.5) l0.meter = meter; // occasionally re-meter
+
+      // 並列混在: at higher intensity, layer a second parallel rhythm (often a world cell)
+      if (Math.random() < inten * 0.45) {
+        const useWorld = Math.random() < 0.6;
+        c.layers[1] = useWorld
+          ? { mode: "WORLD", meter: FOLLOW, k, len, rot, pattern: WORLD_NAMES[Math.floor(Math.random() * WORLD_NAMES.length)] }
+          : { mode: cv2 > 0.5 ? "POLY" : "EUCLID", meter: FOLLOW, k: 1 + Math.round(cv2 * 6), len: 3 + Math.round(cv * 9), rot: Math.round(cv2 * 12), pattern: l0.pattern };
+        c.layers.length = 2;
+      } else {
+        c.layers.length = 1;
+      }
     });
 
     // global arc — the field/liquid breathe with the section

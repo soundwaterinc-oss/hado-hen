@@ -2,8 +2,8 @@
 // hard-clipped knocks, and a heavy, tight low end. Everything is short, dry and precise
 // (dot感). No melody, no sustain pads — just the grid made audible.
 
-export type Lane = "kick" | "sub" | "drag" | "sus" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
-export const LANES: Lane[] = ["kick", "sub", "drag", "sus", "knock", "roll", "click", "tick", "noise", "beep"];
+export type Lane = "kick" | "sub" | "drag" | "sus" | "cak" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
+export const LANES: Lane[] = ["kick", "sub", "drag", "sus", "cak", "knock", "roll", "click", "tick", "noise", "beep"];
 
 export interface VoiceParams {
   master: number;
@@ -67,6 +67,7 @@ export class Voices {
       case "sub":   return this.subVoice(time, lvl, p, panPos);
       case "drag":  return this.drag(time, lvl, p, panPos);
       case "sus":   return this.sus(time, lvl, p, panPos);
+      case "cak":   return this.cak(time, lvl, panPos);
       case "knock": return this.knock(time, lvl, p, panPos);
       case "roll":  return this.roll(time, lvl, p, panPos);
       case "click": return this.click(time, lvl, p, panPos);
@@ -161,6 +162,34 @@ export class Voices {
     const pn = this.pan(pan * 0.15);
     osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
     osc.start(time); osc.stop(time + dur + 0.06);
+  }
+
+  // CAK — Balinese Kecak "chak": a short vocal-like burst. Noise through three vowel
+  // formants (voiced body) + a bright "ch" transient, scattered in the stereo field like
+  // an interlocking chant ensemble.
+  private cak(time: number, lvl: number, pan: number): void {
+    const ctx = this.ctx;
+    const pn = this.pan(pan + (Math.random() * 2 - 1) * 0.4);
+    const dur = 0.055 + Math.random() * 0.035;
+    // voiced vowel body: 3 formants (loosely an "a"), randomised for an ensemble feel
+    const nz = this.noiseSrc(time, dur);
+    const sum = ctx.createGain();
+    for (const [f, q, a] of [[720, 8, 1], [1150, 9, 0.7], [2500, 10, 0.4]] as const) {
+      const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
+      bp.frequency.value = f * (0.9 + Math.random() * 0.2); bp.Q.value = q;
+      const fg = ctx.createGain(); fg.gain.value = a;
+      nz.connect(bp); bp.connect(fg); fg.connect(sum);
+    }
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(lvl * 1.1, time + 0.004); // fast attack = "ch"
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    sum.connect(g); g.connect(pn); pn.connect(this.out);
+    // bright transient on top for the consonant
+    const nz2 = this.noiseSrc(time, 0.012);
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 3500;
+    const tg = this.pluck(time, 0.012, lvl * 0.5);
+    nz2.connect(hp); hp.connect(tg); tg.connect(pn);
   }
 
   // KNOCK — dry wooden/plastic mid knock: short sine burst + hard clip. The "ノック".

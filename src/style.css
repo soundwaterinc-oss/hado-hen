@@ -45,12 +45,15 @@ canvas { width: 100%; display: block; background: #000; border: 1px solid var(--
 
 .panel h2 { font-size: 10px; color: var(--dim); letter-spacing: 0.16em; margin-bottom: 10px; text-transform: uppercase; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
 
-.lane { display: grid; grid-template-columns: 46px 104px 74px 1fr; gap: 8px 10px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--grid); }
-.lane .name { text-transform: uppercase; letter-spacing: 0.1em; }
-.lane .sliders { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.lane { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.lanehead { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 3px; }
+.lanehead .name { min-width: 44px; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600; }
+.layer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 3px 0 3px 14px; }
+.layer .sliders, .lanehead .ctl { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 select.mtr { font-size: 10px; padding: 5px 4px; max-width: 104px; }
+select.mode { font-size: 10px; padding: 5px 4px; max-width: 92px; }
 select.world { font-size: 10px; padding: 5px 4px; max-width: 118px; color: #cfcfcf; }
-@media (max-width: 760px) { .lane { grid-template-columns: 46px 1fr 1fr; } .lane .sliders { grid-column: 1 / -1; } }
+button.tiny { padding: 3px 8px; font-size: 11px; }
 
 .ctl { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
 .ctl label { color: var(--dim); min-width: 62px; text-transform: uppercase; letter-spacing: 0.08em; }

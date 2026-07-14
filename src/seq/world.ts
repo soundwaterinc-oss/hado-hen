@@ -34,9 +34,17 @@ const RAW: Record<string, string> = {
   // ---- Indian-flavoured cells ----
   "Jhaptal (10)":    "x.x..x.x..",
   "Tintal (16)":     "x...x...x...x..x",
-  // ---- North-African ----
+  // ---- North-African / Gnawa ----
   "Gnawa":           "x.xx.xx.",
+  "Gnawa 12":        "x.xx.x.xx.x.",
+  "Gnawa qraqeb":    "x.x.xx.x.xx.",
   "Malfuf":          "x..x..x.",
+  // ---- Balinese / Javanese gamelan ----
+  "Gamelan kotekan": "x.xxx.xxx.xx.xx.",
+  "Gamelan polos":   "x...x...x...x...",
+  "Gamelan sangsih": "..x...x...x...x.",
+  "Gong cycle (16)": "x.......x...x...",
+  "Kecak (cak)":     "x.xx.x.xx.x.xx.x",
 };
 
 export const WORLD_PATTERNS: Record<string, boolean[]> = {};

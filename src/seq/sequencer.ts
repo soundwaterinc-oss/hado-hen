@@ -7,36 +7,47 @@ import { WORLD_PATTERNS, DEFAULT_WORLD } from "./world";
 import { type Lane, LANES } from "../audio/voices";
 
 export type LaneMode = "DOWNBEAT" | "EUCLID" | "POLY" | "WORLD" | "OFF";
+export type Combine = "OR" | "AND" | "XOR";
 
-export interface LaneCfg {
-  meter: string;   // "FOLLOW" (global groove) or a BARS/GROOVES key → this lane's own 変拍子
+// one rhythm generator inside a voice. A voice can stack several of these in parallel.
+export interface Layer {
   mode: LaneMode;
+  meter: string;   // "FOLLOW" (global groove) or a BARS/GROOVES key → this layer's own 変拍子
   k: number;       // EUCLID: onsets per bar · POLY: onsets per cycle
   len: number;     // POLY: cycle length in units
   rot: number;     // rotation
-  prob: number;    // 0..1 trigger probability
   pattern: string; // WORLD: name of the ethnic rhythm cell
+}
+
+// a voice: one or more parallel layers combined, plus trigger probability
+export interface LaneCfg {
+  layers: Layer[];
+  combine: Combine; // OR = union, AND = intersection, XOR = exclusive
+  prob: number;     // 0..1 trigger probability
 }
 
 // one base-unit slot in a resolved meter timeline
 export interface TLEntry { barIndex: number; unitInBar: number; units: number; downs: Set<number>; }
 
 export const FOLLOW = "FOLLOW";
-// meter options offered to each lane (single bars + chained grooves)
+// meter options offered to each layer (single bars + chained grooves)
 export const METERS: string[] = [FOLLOW, ...Object.keys(BARS), ...Object.keys(GROOVES)];
 
 const W = DEFAULT_WORLD;
+const ly = (mode: LaneMode, meter: string, k: number, len: number, rot: number, pattern = W): Layer =>
+  ({ mode, meter, k, len, rot, pattern });
 export const DEFAULT_LANES: Record<Lane, LaneCfg> = {
-  kick:  { meter: FOLLOW, mode: "DOWNBEAT", k: 3, len: 8,  rot: 0, prob: 1,    pattern: W },
-  sub:   { meter: FOLLOW, mode: "POLY",     k: 1, len: 6,  rot: 0, prob: 1,    pattern: W },
-  drag:  { meter: FOLLOW, mode: "POLY",     k: 1, len: 7,  rot: 3, prob: 1,    pattern: W },
-  sus:   { meter: FOLLOW, mode: "POLY",     k: 2, len: 10, rot: 0, prob: 1,    pattern: W },
-  knock: { meter: FOLLOW, mode: "POLY",     k: 3, len: 5,  rot: 0, prob: 1,    pattern: W },
-  roll:  { meter: FOLLOW, mode: "POLY",     k: 2, len: 4,  rot: 0, prob: 0.9,  pattern: W },
-  click: { meter: FOLLOW, mode: "EUCLID",   k: 6, len: 8,  rot: 2, prob: 1,    pattern: W },
-  tick:  { meter: FOLLOW, mode: "POLY",     k: 5, len: 7,  rot: 0, prob: 0.95, pattern: W },
-  noise: { meter: FOLLOW, mode: "EUCLID",   k: 3, len: 8,  rot: 1, prob: 0.85, pattern: W },
-  beep:  { meter: FOLLOW, mode: "POLY",     k: 1, len: 12, rot: 5, prob: 0.8,  pattern: W },
+  kick:  { layers: [ly("DOWNBEAT", FOLLOW, 3, 8, 0)],  combine: "OR", prob: 1 },
+  sub:   { layers: [ly("POLY", FOLLOW, 1, 6, 0)],      combine: "OR", prob: 1 },
+  drag:  { layers: [ly("POLY", FOLLOW, 1, 7, 3)],      combine: "OR", prob: 1 },
+  sus:   { layers: [ly("POLY", FOLLOW, 2, 10, 0)],     combine: "OR", prob: 1 },
+  cak:   { layers: [ly("WORLD", FOLLOW, 3, 8, 0, "Cinquillo")], combine: "OR", prob: 0.9 },
+  knock: { layers: [ly("POLY", FOLLOW, 3, 5, 0)],      combine: "OR", prob: 1 },
+  roll:  { layers: [ly("POLY", FOLLOW, 2, 4, 0)],      combine: "OR", prob: 0.9 },
+  click: { layers: [ly("EUCLID", FOLLOW, 6, 8, 2)],    combine: "OR", prob: 1 },
+  tick:  { layers: [ly("POLY", FOLLOW, 5, 7, 0)],      combine: "OR", prob: 0.95 },
+  noise: { layers: [ly("EUCLID", FOLLOW, 3, 8, 1)],    combine: "OR", prob: 0.85 },
+  beep:  { layers: [ly("POLY", FOLLOW, 1, 12, 5)],     combine: "OR", prob: 0.8 },
 };
 
 export type GateMode = "MANUAL" | "QUANTUM" | "AND" | "OR";
@@ -69,18 +80,18 @@ function buildTimeline(g: Groove): TLEntry[] {
   return out.length ? out : buildTimeline([[4, 4, 4, 4]]);
 }
 
-// pure hit rule — shared by the scheduler and the grid so they never disagree
-export function laneHit(c: LaneCfg, units: number, downs: Set<number>, unitInBar: number, globalUnit: number): boolean {
-  switch (c.mode) {
+// pure hit rule for one layer — shared by scheduler and grid so they never disagree
+export function layerHit(l: Layer, units: number, downs: Set<number>, unitInBar: number, globalUnit: number): boolean {
+  switch (l.mode) {
     case "OFF": return false;
     case "DOWNBEAT": return downs.has(unitInBar);
-    case "EUCLID": return euclid(c.k, units, c.rot)[unitInBar];
+    case "EUCLID": return euclid(l.k, units, l.rot)[unitInBar];
     case "POLY": {
-      const L = Math.max(1, Math.round(c.len));
-      return euclid(c.k, L, c.rot)[((globalUnit % L) + L) % L];
+      const L = Math.max(1, Math.round(l.len));
+      return euclid(l.k, L, l.rot)[((globalUnit % L) + L) % L];
     }
     case "WORLD": {
-      const pat = WORLD_PATTERNS[c.pattern] ?? WORLD_PATTERNS[DEFAULT_WORLD];
+      const pat = WORLD_PATTERNS[l.pattern] ?? WORLD_PATTERNS[DEFAULT_WORLD];
       const L = pat.length;
       return pat[((globalUnit % L) + L) % L];
     }
@@ -119,18 +130,31 @@ export class Sequencer {
     return this.groove;
   }
 
-  // resolved timeline for a lane's chosen meter (cached; FOLLOW tracks the live global groove)
-  timelineFor(lane: Lane): TLEntry[] {
-    const name = this.lanes[lane].meter;
+  // resolved timeline for a meter name (cached; FOLLOW tracks the live global groove)
+  timelineForMeter(name: string): TLEntry[] {
     if (name === FOLLOW) return this.globalTL;
     let tl = this.tlCache.get(name);
     if (!tl) { tl = buildTimeline(this.resolveMeter(name)); this.tlCache.set(name, tl); }
     return tl;
   }
 
-  entryFor(lane: Lane, globalUnit: number): TLEntry {
-    const tl = this.timelineFor(lane);
+  entryForMeter(name: string, globalUnit: number): TLEntry {
+    const tl = this.timelineForMeter(name);
     return tl[((globalUnit % tl.length) + tl.length) % tl.length];
+  }
+
+  // combined hit of all a voice's parallel layers (no probability/gate) — for scheduler & grid
+  laneHitAt(lane: Lane, gu: number): boolean {
+    const c = this.lanes[lane];
+    const active = c.layers.filter((l) => l.mode !== "OFF");
+    if (active.length === 0) return false;
+    const hits = active.map((l) => {
+      const e = this.entryForMeter(l.meter, gu);
+      return layerHit(l, e.units, e.downs, e.unitInBar, gu);
+    });
+    if (c.combine === "AND") return hits.every(Boolean);
+    if (c.combine === "XOR") return hits.filter(Boolean).length % 2 === 1;
+    return hits.some(Boolean); // OR
   }
 
   get globalEntry(): TLEntry {
@@ -168,9 +192,7 @@ export class Sequencer {
 
     for (const lane of LANES) {
       const c = this.lanes[lane];
-      if (c.mode === "OFF") continue;
-      const e = this.entryFor(lane, gu);
-      const manual = laneHit(c, e.units, e.downs, e.unitInBar, gu);
+      const manual = this.laneHitAt(lane, gu); // union/AND/XOR of the voice's parallel layers
 
       // HADŌ quantum gate: |ψ|² at this lane's probe opens the gate
       const mag = this.deps.probe(this.laneProbePos(lane));
@@ -187,7 +209,8 @@ export class Sequencer {
       if (Math.random() > c.prob) continue;
 
       const human = (Math.random() * 2 - 1) * p.humanize;
-      // accent on the lane's OWN downbeats / bar start, then modulated by the field
+      // accent on the primary layer's OWN downbeats / bar start, then modulated by the field
+      const e = this.entryForMeter(c.layers[0].meter, gu);
       let vel = 0.62;
       if (e.downs.has(e.unitInBar)) vel = 0.78 + p.accent * 0.3;
       if (e.unitInBar === 0) vel = 0.9 + p.accent * 0.1;
