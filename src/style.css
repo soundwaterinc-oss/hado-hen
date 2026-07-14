@@ -54,6 +54,7 @@ select.mtr { font-size: 10px; padding: 5px 4px; max-width: 104px; }
 select.mode { font-size: 10px; padding: 5px 4px; max-width: 92px; }
 select.world { font-size: 10px; padding: 5px 4px; max-width: 118px; color: #cfcfcf; }
 button.tiny { padding: 3px 8px; font-size: 11px; }
+.modrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 3px 0; }
 
 .ctl { display: flex; align-items: center; gap: 6px; padding: 5px 0; }
 .ctl label { color: var(--dim); min-width: 62px; text-transform: uppercase; letter-spacing: 0.08em; }

@@ -23,6 +23,13 @@ const state = {
   liqRate: 0.5, liqDelay: 0.05, liqDelayMod: 0.4, liqFb: 0.4,
   // 自動展開 (auto-arranger)
   arrangeOn: false, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5,
+  // MOD LFOs — major params auto-evolve via natural functions instead of staying fixed
+  mods: [
+    { target: "liqBase",   source: "LSYS" as NatureSource,     rate: 0.14, depth: 0.6 },
+    { target: "density",   source: "KURAMOTO" as NatureSource, rate: 0.18, depth: 0.45 },
+    { target: "clickTone", source: "LOGISTIC" as NatureSource, rate: 0.1,  depth: 0.4 },
+    { target: "— off —",   source: "SINE" as NatureSource,     rate: 0.3,  depth: 0.3 },
+  ],
   grooveName: "7+5+9",
   level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.72, cak: 0.7, knock: 0.7, roll: 1.0, click: 0.74, tick: 0.66, noise: 0.5, beep: 0.3 } as Record<Lane, number>,
 };
@@ -32,14 +39,40 @@ const natureMod = new NatureMod();
 const arranger = new Arranger();
 let liqNature = 0.5; // current natural-modulator value (0..1) for the liquid filter
 
+// ---- MOD LFOs (自動展開) ----------------------------------------------------
+// major params can be driven by a natural-function LFO instead of a fixed value
+const MOD_TARGETS: Record<string, [number, number]> = {
+  density: [0, 1], gateThresh: [0, 1], fieldAmt: [0, 1], swing: [0, 0.6], accent: [0, 1],
+  subTune: [32, 90], kickDrive: [0, 1], clickTone: [600, 6000], rollRate: [25, 150],
+  liquid: [0, 1], liqBase: [100, 4000], liqDepth: [0, 3000], liqQ: [0.5, 24],
+};
+const MOD_OFF = "— off —";
+const MOD_TARGET_NAMES = [MOD_OFF, ...Object.keys(MOD_TARGETS)];
+const modMods = [0, 1, 2, 3].map(() => new NatureMod());
+let modLive: Record<string, number> = {};
+
+function computeMods(dt: number, fSample: number): void {
+  modLive = {};
+  state.mods.forEach((m, i) => {
+    const range = MOD_TARGETS[m.target];
+    if (!range) return; // off / unknown
+    const v = modMods[i].step(dt, m.rate, m.source, fSample); // 0..1
+    const base = (state as Record<string, unknown>)[m.target] as number;
+    const half = m.depth * (range[1] - range[0]) / 2;
+    modLive[m.target] = Math.max(range[0], Math.min(range[1], base + (v - 0.5) * 2 * half));
+  });
+}
+const mv = (key: string, base: number): number => modLive[key] ?? base;
+
 // Audio is created lazily on the first PLAY click (inside the user gesture). If audio
 // init fails on a device, the whole UI still renders — the play button always appears.
 let engine: AudioEngine | null = null;
 let freqData: Uint8Array<ArrayBuffer> | null = null;
 let timeData: Uint8Array<ArrayBuffer> | null = null;
 const seqParams = (): SeqParams => ({
-  bpm: state.bpm, swing: state.swing, humanize: state.humanize, accent: state.accent,
-  gateMode: state.gateMode, gateThresh: state.gateThresh, density: state.density, fieldAmt: state.fieldAmt,
+  bpm: state.bpm, swing: mv("swing", state.swing), humanize: state.humanize, accent: mv("accent", state.accent),
+  gateMode: state.gateMode, gateThresh: mv("gateThresh", state.gateThresh),
+  density: mv("density", state.density), fieldAmt: mv("fieldAmt", state.fieldAmt),
 });
 
 let curBar = 0, flash = 0;
@@ -69,20 +102,22 @@ function applyArrange(g: { density: number; gateThresh: number; liqDepth: number
   state.density = g.density; state.gateThresh = g.gateThresh;
   state.liqDepth = g.liqDepth; state.liqRate = g.liqRate;
   natureMod.reseed(arranger.stage);  // liquid movement evolves with the section, too
+  modMods.forEach((m, i) => m.reseed(arranger.stage + i));
 }
 
 function voiceParams(): VoiceParams {
   return {
-    master: state.master, subTune: state.subTune, kickDrive: state.kickDrive,
-    clickTone: state.clickTone, beepTone: state.beepTone, rollRate: state.rollRate, susLen: state.susLen, level: state.level,
+    master: state.master, subTune: mv("subTune", state.subTune), kickDrive: mv("kickDrive", state.kickDrive),
+    clickTone: mv("clickTone", state.clickTone), beepTone: state.beepTone, rollRate: mv("rollRate", state.rollRate),
+    susLen: state.susLen, level: state.level,
   };
 }
 function engineParams(): EngineParams {
   return {
     master: state.master, drive: state.drive, lowBoost: state.lowBoost, reverbMix: state.reverbMix,
-    liquid: state.liquid,
-    liqCutoff: state.liqBase + state.liqDepth * liqNature,        // natural-function sweep
-    liqQ: state.liqQ,
+    liquid: mv("liquid", state.liquid),
+    liqCutoff: mv("liqBase", state.liqBase) + mv("liqDepth", state.liqDepth) * liqNature, // natural-function sweep
+    liqQ: mv("liqQ", state.liqQ),
     liqDelay: state.liqDelay + state.liqDelayMod * 0.05 * liqNature, // gooey pitch wobble
     liqFb: state.liqFb,
   };
@@ -277,6 +312,17 @@ function buildLane(lane: Lane): void {
   laneRows.appendChild(block);
 }
 
+function modRow(i: number): HTMLElement {
+  const m = state.mods[i];
+  const row = el("div", "modrow");
+  row.append(el("span", "tag", "LFO" + (i + 1)));
+  row.append(select(MOD_TARGET_NAMES, m.target, (v) => { m.target = v; }, "mode"));
+  row.append(select(NATURE_SOURCES, m.source, (v) => { m.source = v as NatureSource; }, "mode"));
+  row.append(slider("rate", 0.02, 4, 0.02, m.rate, (v) => v.toFixed(2) + "Hz", (v) => { m.rate = v; }));
+  row.append(slider("depth", 0, 1, 0.05, m.depth, (v) => v.toFixed(2), (v) => { m.depth = v; }));
+  return row;
+}
+
 function labeledSelect(label: string, options: string[], value: string, onChange: (v: string) => void): HTMLElement {
   const wrap = el("div", "ctl");
   wrap.appendChild(el("label", undefined, label));
@@ -310,6 +356,8 @@ function buildGlobals(): void {
     slider("SECTION", 1, 16, 1, state.sectionBars, (v) => v + "bar", (v) => { state.sectionBars = v; }),
     slider("INTENSITY", 0, 1, 0.05, state.arrangeIntensity, (v) => v.toFixed(2), (v) => { state.arrangeIntensity = v; }),
     slider("STAGES", 2, 8, 1, state.arrangeStages, (v) => String(v), (v) => { state.arrangeStages = v; }),
+    el("div", "tag", "· MOD LFO 自動展開 ·"),
+    ...state.mods.map((_, i) => modRow(i)),
     el("div", "tag", "· LIQUID (natural-fn) ·"),
     labeledSelect("SOURCE", NATURE_SOURCES, state.liqSource, (v) => { state.liqSource = v as NatureSource; }),
     slider("MIX", 0, 1, 0.02, state.liquid, (v) => v.toFixed(2), (v) => { state.liquid = v; }),
@@ -337,6 +385,7 @@ function buildGlobals(): void {
     "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。<br>" +
     "WORLD リズム: パターン選択で世界の民族リズム(クラーベ/ベンベ/マクスーム/サンバ/Gnawa/Gamelan/Kecak等)を割当(mode=WORLD)。<br>" +
     "並列混在: ＋layer で各音色に別パターンを重ねられる(最大3層)。mix=OR(和)/AND(積)/XOR(排他)で合成。CAK=ケチャ声。<br>" +
+    "MOD LFO 自動展開: 各LFOに対象パラメータ(density/gateThresh/subTune/clickTone/rollRate/liqBase等)と自然関数SOURCEを割当て、固定でなく自動で揺れ動かす。depth=変化幅。<br>" +
     "SETTINGS: ＋SAVE で名前付きプリセット保存、選択で読込、EXPORT/IMPORT で JSON 入出力(ブラウザに永続)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
     "AUTO 自動展開: L-system/フィロタキシス/ロジスティック写像/場(|ψ|²) の自然関数が SECTION 小節ごとにパターンを再生成し、STAGES 段のアークで展開(INTENSITY=変化の強さ)。<br>" +
@@ -383,6 +432,7 @@ function draw(): void {
   // LIQUID moved by a natural function (optionally the field itself)
   const fSample = Math.max(field.probe(0.2), field.probe(0.5), field.probe(0.8));
   liqNature = natureMod.step(dt, state.liqRate, state.liqSource, fSample);
+  computeMods(dt, fSample); // major params auto-evolve via their LFOs
   seq.schedule();
   if (engine) engine.apply(engineParams());
   flash *= 0.86;

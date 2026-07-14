@@ -164,31 +164,52 @@ export class Voices {
     osc.start(time); osc.stop(time + dur + 0.06);
   }
 
-  // CAK — Balinese Kecak "chak": a short vocal-like burst. Noise through three vowel
-  // formants (voiced body) + a bright "ch" transient, scattered in the stereo field like
-  // an interlocking chant ensemble.
+  // CAK — Balinese Kecak "chak": a proper little VOICE. A pitched glottal source (buzzy
+  // sawtooth in male-chant range + a fifth for the ensemble) is shaped by three vowel
+  // formants that sweep "cha"→"ak"; a breathy noise adds the consonant. Scattered in
+  // stereo like interlocking chanters.
   private cak(time: number, lvl: number, pan: number): void {
     const ctx = this.ctx;
-    const pn = this.pan(pan + (Math.random() * 2 - 1) * 0.4);
-    const dur = 0.055 + Math.random() * 0.035;
-    // voiced vowel body: 3 formants (loosely an "a"), randomised for an ensemble feel
-    const nz = this.noiseSrc(time, dur);
+    const pn = this.pan(pan + (Math.random() * 2 - 1) * 0.45);
+    const dur = 0.14 + Math.random() * 0.06;                 // longer → reads as a syllable
+    const f0 = 110 * Math.pow(2, (Math.random() * 2 - 1) * 0.12); // ~male voice, slight spread
+
+    // glottal source: sawtooth (rich harmonics) + a quiet fifth (chant ensemble)
+    const src = ctx.createGain();
+    const o1 = ctx.createOscillator(); o1.type = "sawtooth"; o1.frequency.value = f0;
+    o1.frequency.linearRampToValueAtTime(f0 * 0.94, time + dur); // tiny falling intonation
+    const o2 = ctx.createOscillator(); o2.type = "sawtooth"; o2.frequency.value = f0 * 1.5;
+    const o2g = ctx.createGain(); o2g.gain.value = 0.35;
+    o1.connect(src); o2.connect(o2g); o2g.connect(src);
+    // breathy noise for the "ch" consonant + air
+    const nz = this.noiseSrc(time, dur); const ng = ctx.createGain(); ng.gain.value = 0.4;
+    nz.connect(ng); ng.connect(src);
+
+    // vowel formants that glide "a"(cha) → "ə/ʌ"(ak) over the syllable
+    const F = [[720, 1150, 2500], [560, 1000, 2400]]; // start vowel → end vowel
     const sum = ctx.createGain();
-    for (const [f, q, a] of [[720, 8, 1], [1150, 9, 0.7], [2500, 10, 0.4]] as const) {
+    for (let k = 0; k < 3; k++) {
       const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
-      bp.frequency.value = f * (0.9 + Math.random() * 0.2); bp.Q.value = q;
-      const fg = ctx.createGain(); fg.gain.value = a;
-      nz.connect(bp); bp.connect(fg); fg.connect(sum);
+      const jitter = 0.94 + Math.random() * 0.12;
+      bp.frequency.setValueAtTime(F[0][k] * jitter, time);
+      bp.frequency.linearRampToValueAtTime(F[1][k] * jitter, time + dur);
+      bp.Q.value = 9 - k * 2;
+      const fg = ctx.createGain(); fg.gain.value = [1, 0.7, 0.45][k];
+      src.connect(bp); bp.connect(fg); fg.connect(sum);
     }
+    // syllable envelope: sharp "ch" attack, short sustain, quick release
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(lvl * 1.1, time + 0.004); // fast attack = "ch"
+    g.gain.linearRampToValueAtTime(lvl * 1.25, time + 0.006);
+    g.gain.setValueAtTime(lvl * 1.05, time + dur * 0.4);
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
     sum.connect(g); g.connect(pn); pn.connect(this.out);
-    // bright transient on top for the consonant
-    const nz2 = this.noiseSrc(time, 0.012);
-    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 3500;
-    const tg = this.pluck(time, 0.012, lvl * 0.5);
+    o1.start(time); o1.stop(time + dur + 0.03); o2.start(time); o2.stop(time + dur + 0.03);
+
+    // bright "ch" consonant transient
+    const nz2 = this.noiseSrc(time, 0.014);
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 3200;
+    const tg = this.pluck(time, 0.014, lvl * 0.55);
     nz2.connect(hp); hp.connect(tg); tg.connect(pn);
   }
 
