@@ -3,8 +3,8 @@
 import "./style.css";
 import { AudioEngine, type EngineParams } from "./audio/engine";
 import { type Lane, LANES, type VoiceParams } from "./audio/voices";
-import { Sequencer, type LaneMode, type SeqParams } from "./seq/sequencer";
-import { GROOVES, barUnits, downbeats, euclid, type Groove } from "./seq/meter";
+import { Sequencer, laneHit, METERS, FOLLOW, type LaneMode, type SeqParams } from "./seq/sequencer";
+import { GROOVES, type Groove } from "./seq/meter";
 import { el, slider, select } from "./ui/controls";
 
 // ---- state -----------------------------------------------------------------
@@ -13,7 +13,7 @@ const state = {
   master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
   subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.45,
   grooveName: "7+5+9",
-  level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.6, knock: 0.7, roll: 1.0, click: 0.65, tick: 0.5, noise: 0.45, beep: 0 } as Record<Lane, number>,
+  level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.72, knock: 0.7, roll: 1.0, click: 0.74, tick: 0.66, noise: 0.5, beep: 0.3 } as Record<Lane, number>,
 };
 
 // Audio is created lazily on the first PLAY click (inside the user gesture). If audio
@@ -23,12 +23,12 @@ let freqData: Uint8Array<ArrayBuffer> | null = null;
 let timeData: Uint8Array<ArrayBuffer> | null = null;
 const seqParams = (): SeqParams => ({ bpm: state.bpm, swing: state.swing, humanize: state.humanize, accent: state.accent });
 
-let curBar = 0, curUnit = 0, flash = 0;
+let curBar = 0, flash = 0;
 const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
   now: () => (engine ? engine.now : 0),
   fire: (lane, time, vel, pan) => engine?.voices.trigger(lane, time, vel, voiceParams(), pan),
-  onStep: (bi, ui, _units, isDown, _time) => {
-    curBar = bi; curUnit = ui;
+  onStep: (bi, _ui, _units, isDown, _time) => {
+    curBar = bi;
     if (isDown) flash = 1;
   },
 }, seqParams);
@@ -83,27 +83,36 @@ app.appendChild(transport);
 // canvases
 const canvases = el("div", "canvases");
 const scope = el("canvas"); scope.width = 1088; scope.height = 130;
-const gridC = el("canvas"); gridC.width = 1088; gridC.height = 190;
+const gridC = el("canvas"); gridC.width = 1088; gridC.height = 240;
 canvases.append(scope, gridC);
 app.appendChild(canvases);
 
 // two columns: lanes | globals
 const cols = el("div", "cols");
 const lanePanel = el("div", "panel");
-lanePanel.appendChild(el("h2", undefined, "LANES — mode · k · length · rot · prob · level"));
+lanePanel.appendChild(el("h2", undefined, "LANES — 変拍子(meter) · mode · k · length · rot · prob · level"));
+const laneRows = el("div");
+lanePanel.appendChild(laneRows);
 const globalPanel = el("div", "panel");
 globalPanel.appendChild(el("h2", undefined, "TONE / GROOVE / MASTER"));
 cols.append(lanePanel, globalPanel);
 app.appendChild(cols);
 
 const MODES: LaneMode[] = ["DOWNBEAT", "EUCLID", "POLY", "OFF"];
-for (const lane of LANES) buildLane(lane);
+rebuildLanes();
 buildGlobals();
+
+function rebuildLanes(): void {
+  laneRows.replaceChildren();
+  for (const lane of LANES) buildLane(lane);
+}
 
 function buildLane(lane: Lane): void {
   const c = seq.lanes[lane];
   const row = el("div", "lane");
   row.append(el("span", "name", lane));
+  const meterSel = select(METERS, c.meter, (v) => { c.meter = v; }, "mtr");
+  row.appendChild(meterSel);
   const modeSel = select(MODES, c.mode, (v) => { c.mode = v as LaneMode; }, undefined);
   row.appendChild(modeSel);
   const sliders = el("div", "sliders");
@@ -115,7 +124,7 @@ function buildLane(lane: Lane): void {
     slider("lvl", 0, 1.2, 0.05, state.level[lane], (v) => v.toFixed(2), (v) => { state.level[lane] = v; }),
   );
   row.appendChild(sliders);
-  lanePanel.appendChild(row);
+  laneRows.appendChild(row);
 }
 
 function buildGlobals(): void {
@@ -145,7 +154,8 @@ function buildGlobals(): void {
     "重い低域は KICK(hard-clip)+SUB+LOW BOOST、ドット感は CLICK/TICK/BEEP。<br>" +
     "ROLL = ずずずず…のバズロール(連符)。ROLL BUZZ でざらつきの速さを調整。<br>" +
     "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。<br>" +
-    "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。";
+    "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。<br>" +
+    "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。";
   g.appendChild(hint);
 }
 
@@ -157,11 +167,13 @@ function randomize(): void {
   for (const lane of LANES) {
     const c = seq.lanes[lane];
     if (lane === "beep") continue;
+    // ~55% of the time give the voice its OWN odd meter → polymeter scatter
+    c.meter = Math.random() < 0.55 ? METERS[1 + Math.floor(Math.random() * (METERS.length - 1))] : FOLLOW;
     c.k = 1 + Math.floor(Math.random() * 7);
     c.len = 4 + Math.floor(Math.random() * 9);
     c.rot = Math.floor(Math.random() * 8);
   }
-  // grid + sequencer read seq.lanes live; lane sliders keep their last shown values.
+  rebuildLanes(); // reflect randomized meter/k/len/rot in the controls
 }
 
 // ---- render loop -----------------------------------------------------------
@@ -200,51 +212,50 @@ function draw(): void {
   requestAnimationFrame(draw);
 }
 
+// polymeter grid — every lane row shows its OWN meter's current bar (group boundaries,
+// playhead, hit dots), so different meters visibly cycle at different widths.
 function drawGrid(): void {
   const W = gridC.width, H = gridC.height;
   gctx.fillStyle = "#000"; gctx.fillRect(0, 0, W, H);
-  const groove = seq.groove;
-  const bar = groove[curBar];
-  const units = barUnits(bar);
-  const dbSet = new Set(downbeats(bar));
+  const gu = seq.globalUnit;
   const rows = LANES;
-  const padL = 62, padT = 20;
-  const cellW = (W - padL - 8) / units;
-  const cellH = (H - padT - 8) / rows.length;
+  const padL = 104, padT = 6;
+  const cellH = (H - padT - 6) / rows.length;
+  gctx.textBaseline = "middle"; gctx.font = "9px monospace";
 
-  // meter header: group brackets + unit numbers
-  gctx.font = "10px monospace"; gctx.textBaseline = "middle";
-  gctx.fillStyle = "#666";
-  gctx.fillText(`${units}u  ${bar.join("+")}`, 4, 10);
-  for (let u = 0; u < units; u++) {
-    const x = padL + u * cellW;
-    gctx.strokeStyle = dbSet.has(u) ? "#444" : "#161616";
-    gctx.lineWidth = dbSet.has(u) ? 1.4 : 1;
-    gctx.beginPath(); gctx.moveTo(x, padT - 4); gctx.lineTo(x, H - 4); gctx.stroke();
-  }
-
-  // playhead
-  const px = padL + curUnit * cellW;
-  gctx.fillStyle = "rgba(255,255,255,0.10)";
-  gctx.fillRect(px, padT - 4, cellW, H - padT);
-
-  // lane rows + hit dots (computed the same way the sequencer fires)
   for (let r = 0; r < rows.length; r++) {
     const lane = rows[r];
     const c = seq.lanes[lane];
+    const e = seq.entryFor(lane, gu);
+    const units = e.units, downs = e.downs, curU = e.unitInBar;
+    const barStart = gu - curU;
     const y = padT + r * cellH + cellH / 2;
-    gctx.fillStyle = "#555";
-    gctx.fillText(lane, 4, y);
+    const cellW = (W - padL - 8) / units;
+
+    // labels: lane name + chosen meter
+    gctx.fillStyle = "#999"; gctx.fillText(lane, 4, y - 4);
+    const mLabel = c.meter === FOLLOW ? "follow" : c.meter.replace(/\s*\(.*\)/, "");
+    gctx.fillStyle = "#555"; gctx.fillText(mLabel, 4, y + 6);
+
+    // group boundaries within this lane's bar
     for (let u = 0; u < units; u++) {
-      let on = false;
-      if (c.mode === "DOWNBEAT") on = dbSet.has(u);
-      else if (c.mode === "EUCLID") on = euclid(c.k, units, c.rot)[u];
-      else if (c.mode === "POLY") { const L = Math.max(1, Math.round(c.len)); on = euclid(c.k, L, c.rot)[u % L]; }
-      if (!on) continue;
+      const x = padL + u * cellW;
+      gctx.strokeStyle = downs.has(u) ? "#3a3a3a" : "#141414";
+      gctx.lineWidth = downs.has(u) ? 1.3 : 1;
+      gctx.beginPath(); gctx.moveTo(x, y - cellH / 2 + 2); gctx.lineTo(x, y + cellH / 2 - 2); gctx.stroke();
+    }
+    // playhead cell
+    if (seq.running) {
+      gctx.fillStyle = "rgba(255,255,255,0.10)";
+      gctx.fillRect(padL + curU * cellW, y - cellH / 2 + 2, cellW, cellH - 4);
+    }
+    // hit dots — same rule the scheduler uses (POLY needs the absolute unit)
+    for (let u = 0; u < units; u++) {
+      if (!laneHit(c, units, downs, u, barStart + u)) continue;
       const x = padL + u * cellW + cellW / 2;
-      const live = u === curUnit;
-      const sz = live ? 4.5 : (dbSet.has(u) ? 3.2 : 2.4);
-      gctx.fillStyle = live ? "#fff" : (dbSet.has(u) ? "#ddd" : "#888");
+      const live = u === curU && seq.running;
+      const sz = live ? 4.2 : (downs.has(u) ? 3 : 2.2);
+      gctx.fillStyle = live ? "#fff" : (downs.has(u) ? "#ddd" : "#888");
       gctx.beginPath(); gctx.arc(x, y, sz, 0, Math.PI * 2); gctx.fill();
     }
   }
