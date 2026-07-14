@@ -2,15 +2,14 @@
 // hard-clipped knocks, and a heavy, tight low end. Everything is short, dry and precise
 // (dot感). No melody, no sustain pads — just the grid made audible.
 
-export type Lane = "kick" | "sub" | "drag" | "sus" | "cak" | "knock" | "brush" | "ride" | "roll" | "click" | "tick" | "noise" | "beep";
-export const LANES: Lane[] = ["kick", "sub", "drag", "sus", "cak", "knock", "brush", "ride", "roll", "click", "tick", "noise", "beep"];
+export type Lane = "kick" | "sub" | "drag" | "sus" | "cak" | "brush" | "ride" | "roll" | "click" | "tick" | "noise";
+export const LANES: Lane[] = ["kick", "sub", "drag", "sus", "cak", "brush", "ride", "roll", "click", "tick", "noise"];
 
 export interface VoiceParams {
   master: number;
   subTune: number;     // Hz, fundamental of kick/sub
   kickDrive: number;   // 0..1 hard-clip amount → weight & hardness
   clickTone: number;   // Hz, click centre
-  beepTone: number;    // Hz, pure test-tone dot
   rollRate: number;    // Hz, buzz gate rate of the roll (ずずずず)
   susLen: number;      // sec, sustain length of the SUS low tone
   level: Record<Lane, number>;
@@ -28,8 +27,18 @@ function clipCurve(drive: number): Float32Array<ArrayBuffer> {
 
 export class Voices {
   private noise: AudioBuffer;
-  constructor(private ctx: AudioContext, private out: AudioNode) {
+  private curDub = 0; // per-hit dub send amount (>0 → this single hit is "thrown")
+  constructor(private ctx: AudioContext, private out: AudioNode, private dubBus: AudioNode) {
     this.noise = this.makeNoise(0.5);
+  }
+
+  // final output for a voice; if the current hit is a dub throw, also feed the dub bus
+  private emit(node: AudioNode): void {
+    node.connect(this.out);
+    if (this.curDub > 0) {
+      const s = this.ctx.createGain(); s.gain.value = this.curDub;
+      node.connect(s); s.connect(this.dubBus);
+    }
   }
 
   private makeNoise(sec: number): AudioBuffer {
@@ -59,23 +68,22 @@ export class Voices {
     return n;
   }
 
-  trigger(lane: Lane, time: number, vel: number, p: VoiceParams, panPos = 0): void {
+  trigger(lane: Lane, time: number, vel: number, p: VoiceParams, panPos = 0, dub = 0): void {
     const lvl = p.level[lane] * vel;
     if (lvl <= 0.001) return;
+    this.curDub = dub;
     switch (lane) {
       case "kick":  return this.kick(time, lvl, p, panPos);
       case "sub":   return this.subVoice(time, lvl, p, panPos);
       case "drag":  return this.drag(time, lvl, p, panPos);
       case "sus":   return this.sus(time, lvl, p, panPos);
       case "cak":   return this.cak(time, lvl, panPos);
-      case "knock": return this.knock(time, lvl, p, panPos);
       case "brush": return this.brush(time, lvl, panPos);
       case "ride":  return this.ride(time, lvl, panPos);
       case "roll":  return this.roll(time, lvl, p, panPos);
       case "click": return this.click(time, lvl, p, panPos);
       case "tick":  return this.tick(time, lvl, panPos);
       case "noise": return this.noiseHit(time, lvl, panPos);
-      case "beep":  return this.beep(time, lvl, p, panPos);
     }
   }
 
@@ -125,7 +133,7 @@ export class Voices {
     const cg = this.pluck(time, 0.004, lvl * 0.55);
     nz.connect(hp); hp.connect(cg); cg.connect(pn);
 
-    pn.connect(this.out);
+    this.emit(pn);
   }
 
   // SUB — click/knock-leaning low hit: a very sharp pitch-snap sine through a hard clip,
@@ -144,7 +152,7 @@ export class Voices {
     g.gain.linearRampToValueAtTime(lvl * 1.7, time + 0.0005);
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
     const pn = this.pan(pan * 0.15);
-    osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.connect(shaper); shaper.connect(g); g.connect(pn); this.emit(pn);
     osc.start(time); osc.stop(time + dur + 0.03);
     // noise click transient → knock definition
     const nz = this.noiseSrc(time, 0.004);
@@ -170,7 +178,7 @@ export class Voices {
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
     const g2 = ctx.createGain(); g2.gain.value = 0.22;
     const pn = this.pan(pan * 0.1);
-    osc.connect(g); osc2.connect(g2); g2.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.connect(g); osc2.connect(g2); g2.connect(g); g.connect(pn); this.emit(pn);
     osc.start(time); osc.stop(time + dur + 0.05);
     osc2.start(time); osc2.stop(time + dur + 0.05);
   }
@@ -191,7 +199,7 @@ export class Voices {
     g.gain.linearRampToValueAtTime(lvl * 1.9, time + 0.001);          // dot attack
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);          // long dragging tail
     const pn = this.pan(pan * 0.15);
-    osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.connect(shaper); shaper.connect(g); g.connect(pn); this.emit(pn);
     osc.start(time); osc.stop(time + dur + 0.06);
   }
 
@@ -234,7 +242,7 @@ export class Voices {
     g.gain.linearRampToValueAtTime(lvl * 1.25, time + 0.006);
     g.gain.setValueAtTime(lvl * 1.05, time + dur * 0.4);
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-    sum.connect(g); g.connect(pn); pn.connect(this.out);
+    sum.connect(g); g.connect(pn); this.emit(pn);
     o1.start(time); o1.stop(time + dur + 0.03); o2.start(time); o2.stop(time + dur + 0.03);
 
     // bright "ch" consonant transient
@@ -242,26 +250,6 @@ export class Voices {
     const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 3200;
     const tg = this.pluck(time, 0.014, lvl * 0.55);
     nz2.connect(hp); hp.connect(tg); tg.connect(pn);
-  }
-
-  // KNOCK — snare: tuned DOWN, dry mid body + a short noise rattle for snare character.
-  private knock(time: number, lvl: number, p: VoiceParams, pan: number): void {
-    const ctx = this.ctx;
-    const f = 120 + p.kickDrive * 70;                     // tuned down (was 180+120)
-    const pn = this.pan(pan * 0.5);
-    const osc = ctx.createOscillator(); osc.type = "sine";
-    osc.frequency.setValueAtTime(f * 2.2, time);
-    osc.frequency.exponentialRampToValueAtTime(f, time + 0.014);
-    const shaper = ctx.createWaveShaper(); shaper.curve = clipCurve(0.55); shaper.oversample = "2x";
-    const g = this.pluck(time, 0.03, lvl * 1.05);
-    osc.connect(shaper); shaper.connect(g); g.connect(pn);
-    osc.start(time); osc.stop(time + 0.05);
-    // snare rattle — short bandpassed noise
-    const nz = this.noiseSrc(time, 0.03);
-    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 1900; bp.Q.value = 0.9;
-    const ng = this.pluck(time, 0.03, lvl * 0.5);
-    nz.connect(bp); bp.connect(ng); ng.connect(pn);
-    pn.connect(this.out);
   }
 
   // BRUSH — ECM-jazz brushed snare: a soft filtered-noise "shh" with a gentle attack.
@@ -276,7 +264,7 @@ export class Voices {
     g.gain.setValueAtTime(0, time);
     g.gain.linearRampToValueAtTime(lvl * 0.5, time + 0.01);   // soft brushed attack
     g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-    nz.connect(bp); bp.connect(g); g.connect(pn); pn.connect(this.out);
+    nz.connect(bp); bp.connect(g); g.connect(pn); this.emit(pn);
   }
 
   // RIDE — ECM-jazz ride cymbal: inharmonic metallic "ding" + a soft high wash. Warm, not crashy.
@@ -305,7 +293,7 @@ export class Voices {
     ng.gain.linearRampToValueAtTime(lvl * 0.18, time + 0.004);
     ng.gain.exponentialRampToValueAtTime(0.0001, time + dur * 0.8);
     nz.connect(hp); hp.connect(ng); ng.connect(pn);
-    pn.connect(this.out);
+    this.emit(pn);
   }
 
   // ROLL — buzz roll / 連符 "ずずずず": low-mid noise + a low body tone, chopped by a fast
@@ -348,7 +336,7 @@ export class Voices {
     nz.connect(bp); bp.connect(bpG); bpG.connect(gate);
     nz2.connect(hp); hp.connect(hpG); hpG.connect(gate);
     tone.connect(toneG); toneG.connect(gate);
-    gate.connect(env); env.connect(pn); pn.connect(this.out);
+    gate.connect(env); env.connect(pn); this.emit(pn);
 
     lfo.start(time); lfo.stop(time + dur + 0.02);
     tone.start(time); tone.stop(time + dur + 0.02);
@@ -362,7 +350,7 @@ export class Voices {
     const pn = this.pan(pan);
     const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = freq;
     const g = this.pluck(time, dur, lvl);
-    osc.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.connect(g); g.connect(pn); this.emit(pn);
     osc.start(time); osc.stop(time + dur + 0.02);
     // transient bite
     const nz = this.noiseSrc(time, 0.002);
@@ -378,7 +366,7 @@ export class Voices {
     const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = freq;
     const g = this.pluck(time, 0.003, lvl * 0.8);
     const pn = this.pan(pan);
-    osc.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.connect(g); g.connect(pn); this.emit(pn);
     osc.start(time); osc.stop(time + 0.02);
   }
 
@@ -391,21 +379,7 @@ export class Voices {
     bp.frequency.value = 1400 + Math.random() * 2600; bp.Q.value = 1.2;
     const g = this.pluck(time, dur, lvl * 0.7);
     const pn = this.pan(pan * 0.8);
-    nz.connect(bp); bp.connect(g); g.connect(pn); pn.connect(this.out);
+    nz.connect(bp); bp.connect(g); g.connect(pn); this.emit(pn);
   }
 
-  // BEEP — pure fixed-pitch test-tone dot (Ikeda sine-wave signature). Off by default.
-  private beep(time: number, lvl: number, p: VoiceParams, pan: number): void {
-    const ctx = this.ctx;
-    const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = p.beepTone;
-    const dur = 0.03;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(lvl * 0.7, time + 0.001);
-    g.gain.setValueAtTime(lvl * 0.7, time + dur - 0.002);
-    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-    const pn = this.pan(pan);
-    osc.connect(g); g.connect(pn); pn.connect(this.out);
-    osc.start(time); osc.stop(time + dur + 0.02);
-  }
 }

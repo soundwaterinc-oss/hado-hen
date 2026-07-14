@@ -33,6 +33,10 @@ export interface EngineParams {
   liqQ: number;       // resonance
   liqDelay: number;   // s — chorus/goo delay time (also naturally modulated)
   liqFb: number;      // 0..1 feedback
+  dubTime: number;    // s — dub delay time
+  dubFb: number;      // 0..1 dub feedback (number of repeats)
+  dubTone: number;    // Hz — dub feedback lowpass
+  dubMix: number;     // 0..1 dub return level
 }
 
 export class AudioEngine {
@@ -48,6 +52,14 @@ export class AudioEngine {
   private liquidLP: BiquadFilterNode;
   private liqDelay: DelayNode;
   private liqFb: GainNode;
+  private dubBus: GainNode;
+  private dubL: DelayNode;
+  private dubR: DelayNode;
+  private dubFbL: GainNode;
+  private dubFbR: GainNode;
+  private dubToneL: BiquadFilterNode;
+  private dubToneR: BiquadFilterNode;
+  private dubReturn: GainNode;
   private limiter: DynamicsCompressorNode;
   started = false;
 
@@ -85,16 +97,35 @@ export class AudioEngine {
     this.liqDelay = ctx.createDelay(0.4); this.liqDelay.delayTime.value = 0.05;
     this.liqFb = ctx.createGain(); this.liqFb.gain.value = 0.4;
 
+    // DUB — a stereo ping-pong feedback delay with band-limited (dubby) feedback. Individual
+    // voices tap into dubBus only when a hit is "thrown", so single notes echo across the field.
+    this.dubBus = ctx.createGain();
+    const dubHP = ctx.createBiquadFilter(); dubHP.type = "highpass"; dubHP.frequency.value = 200; // keep lows dry
+    this.dubL = ctx.createDelay(2); this.dubR = ctx.createDelay(2);
+    this.dubL.delayTime.value = 0.3; this.dubR.delayTime.value = 0.45;
+    this.dubFbL = ctx.createGain(); this.dubFbR = ctx.createGain(); this.dubFbL.gain.value = 0.55; this.dubFbR.gain.value = 0.55;
+    this.dubToneL = ctx.createBiquadFilter(); this.dubToneL.type = "lowpass"; this.dubToneL.frequency.value = 2400;
+    this.dubToneR = ctx.createBiquadFilter(); this.dubToneR.type = "lowpass"; this.dubToneR.frequency.value = 2400;
+    const dubPanL = ctx.createStereoPanner(); dubPanL.pan.value = -0.7;
+    const dubPanR = ctx.createStereoPanner(); dubPanR.pan.value = 0.7;
+    this.dubReturn = ctx.createGain(); this.dubReturn.gain.value = 0.9;
+    this.dubBus.connect(dubHP); dubHP.connect(this.dubL);
+    this.dubL.connect(this.dubToneL); this.dubToneL.connect(this.dubFbL); this.dubFbL.connect(this.dubR); // L → R
+    this.dubR.connect(this.dubToneR); this.dubToneR.connect(this.dubFbR); this.dubFbR.connect(this.dubL); // R → L (ping-pong)
+    this.dubL.connect(dubPanL); this.dubR.connect(dubPanR);
+    dubPanL.connect(this.dubReturn); dubPanR.connect(this.dubReturn);
+
     bus.connect(this.sat); this.sat.connect(this.shelf); this.shelf.connect(this.hp);
     this.hp.connect(this.limiter);            // dry
     this.hp.connect(this.revSend); this.revSend.connect(conv); conv.connect(this.limiter);
     this.hp.connect(this.liquidSend); this.liquidSend.connect(this.liquidLP);
     this.liquidLP.connect(this.liqDelay); this.liqDelay.connect(this.liqFb); this.liqFb.connect(this.liqDelay);
     this.liquidLP.connect(this.limiter); this.liqDelay.connect(this.limiter);
+    this.dubReturn.connect(this.limiter); this.dubReturn.connect(this.revSend); // dub also gets a little room
     this.limiter.connect(this.master);
     this.master.connect(this.analyser); this.analyser.connect(ctx.destination);
 
-    this.voices = new Voices(ctx, bus);
+    this.voices = new Voices(ctx, bus, this.dubBus);
   }
 
   async resume(): Promise<void> {
@@ -114,5 +145,12 @@ export class AudioEngine {
     this.liquidLP.Q.setTargetAtTime(p.liqQ, t, 0.05);
     this.liqDelay.delayTime.setTargetAtTime(Math.max(0.002, Math.min(0.39, p.liqDelay)), t, 0.03);
     this.liqFb.gain.setTargetAtTime(Math.max(0, Math.min(0.85, p.liqFb)), t, 0.05);
+    const dt2 = Math.max(0.03, Math.min(1.2, p.dubTime));
+    this.dubL.delayTime.setTargetAtTime(dt2, t, 0.08);
+    this.dubR.delayTime.setTargetAtTime(dt2 * 1.5, t, 0.08);
+    const fb = Math.max(0, Math.min(0.85, p.dubFb));
+    this.dubFbL.gain.setTargetAtTime(fb, t, 0.05); this.dubFbR.gain.setTargetAtTime(fb, t, 0.05);
+    this.dubToneL.frequency.setTargetAtTime(p.dubTone, t, 0.05); this.dubToneR.frequency.setTargetAtTime(p.dubTone, t, 0.05);
+    this.dubReturn.gain.setTargetAtTime(p.dubMix, t, 0.05);
   }
 }

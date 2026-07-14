@@ -16,12 +16,14 @@ import { el, slider, select } from "./ui/controls";
 const state = {
   bpm: 124, swing: 0.3, humanize: 0.0016, accent: 0.5,
   master: 0.9, drive: 0.2, lowBoost: 5.5, reverbMix: 0.14,
-  subTune: 46, kickDrive: 0.55, clickTone: 1400, beepTone: 760, rollRate: 42, susLen: 0.5,
+  subTune: 46, kickDrive: 0.55, clickTone: 1400, rollRate: 42, susLen: 0.5,
   // HADŌ quantum field
   gateMode: "OR" as GateMode, gateThresh: 0.34, density: 0.2, fieldAmt: 0.45, fieldSpeed: 1.0, fieldExcite: 0.6,
   // LIQUID — resonant squelch driven by a natural function
   liquid: 0.08, liqSource: "LSYS" as NatureSource, liqBase: 480, liqDepth: 900, liqQ: 11,
   liqRate: 0.5, liqDelay: 0.05, liqDelayMod: 0.4, liqFb: 0.4,
+  // DUB — ping-pong echo that catches a random single hit ("throw")
+  dubThrow: 0.07, dubSend: 0.85, dubTime: 0.32, dubFb: 0.55, dubTone: 2400, dubMix: 0.9,
   // 自動展開 (auto-arranger) — on by default: stage arc + density ebb/flow + random breaks
   arrangeOn: true, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5, arrangeBreak: 0.25,
   // リズム自動変化 (continuous drift, on by default)
@@ -34,13 +36,15 @@ const state = {
     { target: "— off —",   source: "SINE" as NatureSource,     rate: 0.3,  depth: 0.3 },
   ],
   grooveName: "7+5+9",
-  level: { kick: 1.0, sub: 0.85, drag: 0.72, sus: 0.6, cak: 0.45, knock: 0.62, brush: 0.42, ride: 0.5, roll: 0.6, click: 0.5, tick: 0.42, noise: 0.3, beep: 0.18 } as Record<Lane, number>,
+  level: { kick: 1.0, sub: 0.85, drag: 0.72, sus: 0.6, cak: 0.45, brush: 0.42, ride: 0.5, roll: 0.6, click: 0.5, tick: 0.42, noise: 0.3 } as Record<Lane, number>,
 };
 
 const field = new QuantumField(128);
 const natureMod = new NatureMod();
 const arranger = new Arranger();
 let liqNature = 0.5; // current natural-modulator value (0..1) for the liquid filter
+// voices eligible for a dub throw (skip the lows so the dub stays clean)
+const THROWABLE = new Set<Lane>(["cak", "brush", "ride", "roll", "click", "tick", "noise"]);
 
 // ---- MOD LFOs (自動展開) ----------------------------------------------------
 // major params can be driven by a natural-function LFO instead of a fixed value
@@ -82,7 +86,9 @@ let curBar = 0, flash = 0;
 const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
   now: () => (engine ? engine.now : 0),
   fire: (lane, time, vel, pan) => {
-    engine?.voices.trigger(lane, time, vel, voiceParams(), pan);
+    // dub throw: occasionally send THIS single (non-low) hit into the ping-pong dub
+    const dub = (THROWABLE.has(lane) && Math.random() < state.dubThrow) ? state.dubSend : 0;
+    engine?.voices.trigger(lane, time, vel, voiceParams(), pan, dub);
     // low-end hits excite the field → 拍 that stirs the 波動
     if (lane === "kick" || lane === "sub" || lane === "drag") {
       field.excite(0.5 + (Math.random() * 2 - 1) * 0.2, state.fieldExcite * vel, 4 + Math.random() * 4);
@@ -128,7 +134,7 @@ function applyArrange(g: { density: number; gateThresh: number; liqDepth: number
 function voiceParams(): VoiceParams {
   return {
     master: state.master, subTune: mv("subTune", state.subTune), kickDrive: mv("kickDrive", state.kickDrive),
-    clickTone: mv("clickTone", state.clickTone), beepTone: state.beepTone, rollRate: mv("rollRate", state.rollRate),
+    clickTone: mv("clickTone", state.clickTone), rollRate: mv("rollRate", state.rollRate),
     susLen: state.susLen, level: state.level,
   };
 }
@@ -140,6 +146,7 @@ function engineParams(): EngineParams {
     liqQ: mv("liqQ", state.liqQ),
     liqDelay: state.liqDelay + state.liqDelayMod * 0.05 * liqNature, // gooey pitch wobble
     liqFb: state.liqFb,
+    dubTime: state.dubTime, dubFb: state.dubFb, dubTone: state.dubTone, dubMix: state.dubMix,
   };
 }
 
@@ -385,7 +392,6 @@ function buildGlobals(): void {
     slider("SUB TUNE", 32, 90, 1, state.subTune, (v) => v + "Hz", (v) => { state.subTune = v; }),
     slider("KICK DRIVE", 0, 1, 0.05, state.kickDrive, (v) => v.toFixed(2), (v) => { state.kickDrive = v; }),
     slider("CLICK TONE", 600, 6000, 50, state.clickTone, (v) => v + "Hz", (v) => { state.clickTone = v; }),
-    slider("BEEP TONE", 220, 3000, 10, state.beepTone, (v) => v + "Hz", (v) => { state.beepTone = v; }),
     slider("ROLL BUZZ", 25, 150, 1, state.rollRate, (v) => v + "Hz", (v) => { state.rollRate = v; }),
     slider("SUS LEN", 0.15, 1.6, 0.05, state.susLen, (v) => v.toFixed(2) + "s", (v) => { state.susLen = v; }),
     el("div", "tag", "· HADŌ FIELD |ψ|² ·"),
@@ -415,6 +421,13 @@ function buildGlobals(): void {
     slider("DELAY", 0.002, 0.3, 0.002, state.liqDelay, (v) => (v * 1000).toFixed(0) + "ms", (v) => { state.liqDelay = v; }),
     slider("DELAY MOD", 0, 1, 0.05, state.liqDelayMod, (v) => v.toFixed(2), (v) => { state.liqDelayMod = v; }),
     slider("FEEDBACK", 0, 0.85, 0.02, state.liqFb, (v) => v.toFixed(2), (v) => { state.liqFb = v; }),
+    el("div", "tag", "· DUB THROW (単発) ·"),
+    slider("THROW", 0, 0.5, 0.01, state.dubThrow, (v) => v.toFixed(2), (v) => { state.dubThrow = v; }),
+    slider("SEND", 0, 1.5, 0.05, state.dubSend, (v) => v.toFixed(2), (v) => { state.dubSend = v; }),
+    slider("DUB TIME", 0.05, 1.0, 0.01, state.dubTime, (v) => (v * 1000).toFixed(0) + "ms", (v) => { state.dubTime = v; }),
+    slider("DUB FB", 0, 0.85, 0.02, state.dubFb, (v) => v.toFixed(2), (v) => { state.dubFb = v; }),
+    slider("DUB TONE", 400, 6000, 50, state.dubTone, (v) => v + "Hz", (v) => { state.dubTone = v; }),
+    slider("DUB RETURN", 0, 1.2, 0.05, state.dubMix, (v) => v.toFixed(2), (v) => { state.dubMix = v; }),
     el("div", "tag", "· MASTER ·"),
     slider("LOW BOOST", 0, 10, 0.5, state.lowBoost, (v) => "+" + v + "dB", (v) => { state.lowBoost = v; }),
     slider("DRIVE", 0, 1, 0.05, state.drive, (v) => v.toFixed(2), (v) => { state.drive = v; }),
@@ -425,14 +438,15 @@ function buildGlobals(): void {
   hint.innerHTML =
     "変拍子 = 加算拍子(3+2+2…)の連結 × ポリメーター。<br>" +
     "DOWNBEAT: 各グループ頭 / EUCLID: 小節長に均等 k 発音 / POLY: 独立周期 len で位相ずれ。<br>" +
-    "重い低域は KICK(hard-clip)+SUB+LOW BOOST、ドット感は CLICK/TICK/BEEP。<br>" +
+    "重い低域は KICK(hard-clip)+SUB+LOW BOOST、ドット感は CLICK/TICK。<br>" +
     "ROLL = ずずずず…のバズロール(連符)。ROLL BUZZ でざらつきの速さを調整。<br>" +
     "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。<br>" +
     "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。<br>" +
     "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。<br>" +
     "WORLD リズム: パターン選択で世界の民族リズム(クラーベ/ベンベ/マクスーム/サンバ/Gnawa/Gamelan/Kecak等)を割当(mode=WORLD)。<br>" +
     "並列混在: ＋layer で各音色に別パターンを重ねられる(最大3層)。mix=OR(和)/AND(積)/XOR(排他)で合成。CAK=ケチャ声。<br>" +
-    "ECMジャズ: RIDE=ライドシンバル(スイング)、BRUSH=ブラシ・スネア、KNOCK=下げたスネア。SWING を上げると跳ねる。deep寄りの低チューニング＋ROOM で空間。<br>" +
+    "ECMジャズ: RIDE=ライドシンバル(スイング)、BRUSH=ブラシ・スネア(スネア役)。SWING を上げると跳ねる。deep寄りの低チューニング＋ROOM で空間。<br>" +
+    "DUB THROW: 全体でなく特定タイミングの一音だけをランダムにピンポン・ディレイへ飛ばす。THROW=飛ばす頻度、SEND=送り量、DUB TIME/FB/TONE/RETURN で残響。<br>" +
     "MOD LFO 自動展開: 各LFOに対象パラメータ(density/gateThresh/subTune/clickTone/rollRate/liqBase等)と自然関数SOURCEを割当て、固定でなく自動で揺れ動かす。depth=変化幅。<br>" +
     "SETTINGS: ＋SAVE で名前付きプリセット保存、選択で読込、EXPORT/IMPORT で JSON 入出力(ブラウザに永続)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
@@ -450,7 +464,6 @@ function randomize(): void {
   const rMeter = (): string => Math.random() < 0.55 ? METERS[1 + Math.floor(Math.random() * (METERS.length - 1))] : FOLLOW;
   for (const lane of LANES) {
     const c = seq.lanes[lane];
-    if (lane === "beep") continue;
     const l0 = c.layers[0];
     l0.meter = rMeter();
     l0.k = 1 + Math.floor(Math.random() * 7);

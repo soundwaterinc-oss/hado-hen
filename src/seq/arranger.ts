@@ -27,14 +27,14 @@ export interface ArrangeGlobals {
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
 // per-stage voice activity (0 = pulled out, 1 = full), aligned to LANES:
-// [kick, sub, drag, sus, cak, knock, brush, ride, roll, click, tick, noise, beep]
+// [kick, sub, drag, sus, cak, brush, ride, roll, click, tick, noise]
 interface Stage { energy: number; brk: boolean; act: number[] }
 const STAGES: Stage[] = [
-  { energy: 0.50, brk: false, act: [1, 1,   0.5, 0.5, 0,   0.4, 0.4, 0.8, 0,   0.6, 0,   0,   0  ] }, // intro: kick+sub+ride (ECM open)
-  { energy: 0.72, brk: false, act: [1, 1,   0.7, 0.6, 0.4, 0.8, 0.6, 0.9, 0.4, 0.9, 0.6, 0.3, 0.2] }, // build
-  { energy: 0.95, brk: false, act: [1, 1,   0.9, 0.7, 0.7, 1,   0.6, 1,   0.7, 1,   0.9, 0.7, 0.5] }, // full
-  { energy: 0.80, brk: true,  act: [1, 0.3, 0.2, 0.2, 1,   1,   0.2, 0.3, 0.9, 1,   1,   0.6, 0.3] }, // BREAK: electronic, ride pulled
-  { energy: 1.00, brk: false, act: [1, 1,   1,   0.8, 0.8, 1,   0.5, 0.9, 0.8, 1,   1,   0.8, 0.6] }, // finale
+  { energy: 0.50, brk: false, act: [1, 1,   0.5, 0.5, 0,   0.4, 0.8, 0,   0.6, 0,   0  ] }, // intro: kick+sub+ride (ECM open)
+  { energy: 0.72, brk: false, act: [1, 1,   0.7, 0.6, 0.4, 0.6, 0.9, 0.4, 0.9, 0.6, 0.3] }, // build
+  { energy: 0.95, brk: false, act: [1, 1,   0.9, 0.7, 0.7, 0.6, 1,   0.7, 1,   0.9, 0.7] }, // full
+  { energy: 0.80, brk: true,  act: [1, 0.3, 0.2, 0.2, 1,   0.2, 0.3, 0.9, 1,   1,   0.6] }, // BREAK: electronic, ride pulled
+  { energy: 1.00, brk: false, act: [1, 1,   1,   0.8, 0.8, 0.5, 0.9, 0.8, 1,   1,   0.8] }, // finale
 ];
 const BREAK_ACT = STAGES[3].act;
 
@@ -66,8 +66,8 @@ export class Arranger {
     const kit = KITS[Math.floor(Math.random() * KITS.length)];
     const set = (lane: Lane, name: string): void => { seq.lanes[lane].layers = this.wl(name); seq.lanes[lane].combine = "OR"; };
     set("kick", kit.kick);
-    set("knock", kit.snare);
-    set("cak", kit.snare);
+    set("cak", kit.snare);   // snare role
+    set("brush", kit.snare);
     set("click", kit.hat);
     set("tick", kit.hat);
     set("roll", kit.ghost);
@@ -87,9 +87,11 @@ export class Arranger {
     if (breakActive) {
       this.applyBreak(seq);
     } else {
-      // restore the kick anchor (it may have been a break pattern last section)
+      // restore the kick anchor + the jazz kit (they may have held break patterns last section)
       seq.lanes.kick.layers = [{ mode: "DOWNBEAT", meter: FOLLOW, k: 3, len: 8, rot: 0, pattern: WORLD_NAMES[0] }];
       seq.lanes.kick.combine = "OR";
+      seq.lanes.ride.layers = this.wl("Jazz ride");
+      seq.lanes.brush.layers = this.wl("Jazz comp");
       // regenerate each voice's primary layer via the chosen engine, scaled by stage energy
       const curve = lsysCurve(this.stage + 1);
       let lx = 0.31 + 0.4 * ((this.stage % 3) / 3);
