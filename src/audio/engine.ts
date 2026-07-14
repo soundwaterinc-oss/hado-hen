@@ -28,7 +28,11 @@ export interface EngineParams {
   drive: number;      // master saturation
   lowBoost: number;   // dB low-shelf @ 90 Hz
   reverbMix: number;  // 0..1 short room send
-  liquid: number;     // 0..1 wet squelch (resonant lowpass wobble + modulated delay)
+  liquid: number;     // 0..1 wet mix of the LIQUID path
+  liqCutoff: number;  // Hz — resonant LP cutoff (naturally modulated per frame)
+  liqQ: number;       // resonance
+  liqDelay: number;   // s — chorus/goo delay time (also naturally modulated)
+  liqFb: number;      // 0..1 feedback
 }
 
 export class AudioEngine {
@@ -42,6 +46,8 @@ export class AudioEngine {
   private revSend: GainNode;
   private liquidSend: GainNode;
   private liquidLP: BiquadFilterNode;
+  private liqDelay: DelayNode;
+  private liqFb: GainNode;
   private limiter: DynamicsCompressorNode;
   started = false;
 
@@ -70,26 +76,21 @@ export class AudioEngine {
     const conv = ctx.createConvolver(); conv.buffer = roomIR(ctx, 0.25);
     this.revSend = ctx.createGain(); this.revSend.gain.value = 0;
 
-    // LIQUID — a wet, squelchy parallel path: resonant lowpass whose cutoff is wobbled by a
-    // slow LFO, into a short modulated feedback delay → gooey "ねちょねちょ" movement.
+    // LIQUID — a wet, squelchy parallel path: a high-resonance lowpass whose cutoff & delay
+    // are modulated per frame by a NATURAL function (L-system / logistic / Kuramoto / |ψ|²),
+    // into a short feedback delay → gooey, living "ねちょねちょ" movement.
     this.liquidSend = ctx.createGain(); this.liquidSend.gain.value = 0;
     this.liquidLP = ctx.createBiquadFilter(); this.liquidLP.type = "lowpass";
-    this.liquidLP.frequency.value = 700; this.liquidLP.Q.value = 11; // high resonance = squelch
-    const liqLfo = ctx.createOscillator(); liqLfo.type = "sine"; liqLfo.frequency.value = 0.45;
-    const liqLfoAmt = ctx.createGain(); liqLfoAmt.gain.value = 520;
-    liqLfo.connect(liqLfoAmt); liqLfoAmt.connect(this.liquidLP.frequency); liqLfo.start();
-    const liqDelay = ctx.createDelay(0.2); liqDelay.delayTime.value = 0.05;
-    const liqFb = ctx.createGain(); liqFb.gain.value = 0.4;
-    const dLfo = ctx.createOscillator(); dLfo.type = "sine"; dLfo.frequency.value = 0.28;
-    const dLfoAmt = ctx.createGain(); dLfoAmt.gain.value = 0.008;
-    dLfo.connect(dLfoAmt); dLfoAmt.connect(liqDelay.delayTime); dLfo.start();
+    this.liquidLP.frequency.value = 700; this.liquidLP.Q.value = 11;
+    this.liqDelay = ctx.createDelay(0.4); this.liqDelay.delayTime.value = 0.05;
+    this.liqFb = ctx.createGain(); this.liqFb.gain.value = 0.4;
 
     bus.connect(this.sat); this.sat.connect(this.shelf); this.shelf.connect(this.hp);
     this.hp.connect(this.limiter);            // dry
     this.hp.connect(this.revSend); this.revSend.connect(conv); conv.connect(this.limiter);
     this.hp.connect(this.liquidSend); this.liquidSend.connect(this.liquidLP);
-    this.liquidLP.connect(liqDelay); liqDelay.connect(liqFb); liqFb.connect(liqDelay);
-    this.liquidLP.connect(this.limiter); liqDelay.connect(this.limiter);
+    this.liquidLP.connect(this.liqDelay); this.liqDelay.connect(this.liqFb); this.liqFb.connect(this.liqDelay);
+    this.liquidLP.connect(this.limiter); this.liqDelay.connect(this.limiter);
     this.limiter.connect(this.master);
     this.master.connect(this.analyser); this.analyser.connect(ctx.destination);
 
@@ -109,5 +110,9 @@ export class AudioEngine {
     this.shelf.gain.setTargetAtTime(p.lowBoost, t, 0.05);
     this.revSend.gain.setTargetAtTime(p.reverbMix, t, 0.05);
     this.liquidSend.gain.setTargetAtTime(p.liquid, t, 0.05);
+    this.liquidLP.frequency.setTargetAtTime(Math.max(80, Math.min(12000, p.liqCutoff)), t, 0.02);
+    this.liquidLP.Q.setTargetAtTime(p.liqQ, t, 0.05);
+    this.liqDelay.delayTime.setTargetAtTime(Math.max(0.002, Math.min(0.39, p.liqDelay)), t, 0.03);
+    this.liqFb.gain.setTargetAtTime(Math.max(0, Math.min(0.85, p.liqFb)), t, 0.05);
   }
 }

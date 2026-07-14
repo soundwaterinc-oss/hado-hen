@@ -6,20 +6,30 @@ import { type Lane, LANES, type VoiceParams } from "./audio/voices";
 import { Sequencer, laneHit, METERS, FOLLOW, type LaneMode, type SeqParams, type GateMode } from "./seq/sequencer";
 import { GROOVES, type Groove } from "./seq/meter";
 import { QuantumField } from "./field/field";
+import { NatureMod, NATURE_SOURCES, type NatureSource } from "./seq/nature";
+import { Arranger, ARRANGE_ENGINES, type ArrangeEngine, type ArrangeOpts } from "./seq/arranger";
 import { el, slider, select } from "./ui/controls";
 
 // ---- state -----------------------------------------------------------------
 const state = {
   bpm: 132, swing: 0.0, humanize: 0.0006, accent: 0.5,
-  master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0, liquid: 0.16,
+  master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
   subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.45,
   // HADŌ quantum field
   gateMode: "OR" as GateMode, gateThresh: 0.3, density: 0.35, fieldAmt: 0.5, fieldSpeed: 1.0, fieldExcite: 0.7,
+  // LIQUID — resonant squelch driven by a natural function
+  liquid: 0.16, liqSource: "LSYS" as NatureSource, liqBase: 480, liqDepth: 900, liqQ: 11,
+  liqRate: 0.5, liqDelay: 0.05, liqDelayMod: 0.4, liqFb: 0.4,
+  // 自動展開 (auto-arranger)
+  arrangeOn: false, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5,
   grooveName: "7+5+9",
   level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.72, knock: 0.7, roll: 1.0, click: 0.74, tick: 0.66, noise: 0.5, beep: 0.3 } as Record<Lane, number>,
 };
 
 const field = new QuantumField(128);
+const natureMod = new NatureMod();
+const arranger = new Arranger();
+let liqNature = 0.5; // current natural-modulator value (0..1) for the liquid filter
 
 // Audio is created lazily on the first PLAY click (inside the user gesture). If audio
 // init fails on a device, the whole UI still renders — the play button always appears.
@@ -45,8 +55,20 @@ const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
   onStep: (bi, _ui, _units, isDown, _time) => {
     curBar = bi;
     if (isDown) flash = 1;
+    if (bi !== prevBar) { prevBar = bi; arranger.notifyBar(arrangeOpts(), seq, (p) => field.probe(p), applyArrange); }
   },
 }, seqParams);
+
+let prevBar = -1;
+const arrangeOpts = (): ArrangeOpts => ({
+  on: state.arrangeOn, engine: state.arrangeEngine, sectionBars: state.sectionBars,
+  intensity: state.arrangeIntensity, stages: state.arrangeStages,
+});
+function applyArrange(g: { density: number; gateThresh: number; liqDepth: number; liqRate: number }): void {
+  state.density = g.density; state.gateThresh = g.gateThresh;
+  state.liqDepth = g.liqDepth; state.liqRate = g.liqRate;
+  natureMod.reseed(arranger.stage);  // liquid movement evolves with the section, too
+}
 
 function voiceParams(): VoiceParams {
   return {
@@ -55,7 +77,14 @@ function voiceParams(): VoiceParams {
   };
 }
 function engineParams(): EngineParams {
-  return { master: state.master, drive: state.drive, lowBoost: state.lowBoost, reverbMix: state.reverbMix, liquid: state.liquid };
+  return {
+    master: state.master, drive: state.drive, lowBoost: state.lowBoost, reverbMix: state.reverbMix,
+    liquid: state.liquid,
+    liqCutoff: state.liqBase + state.liqDepth * liqNature,        // natural-function sweep
+    liqQ: state.liqQ,
+    liqDelay: state.liqDelay + state.liqDelayMod * 0.05 * liqNature, // gooey pitch wobble
+    liqFb: state.liqFb,
+  };
 }
 
 // ---- UI --------------------------------------------------------------------
@@ -79,6 +108,7 @@ playBtn.addEventListener("click", async () => {
     }
     await engine.resume();
     seq.toggle();
+    if (seq.running) { arranger.reset(); prevBar = -1; }
     playBtn.classList.toggle("on", seq.running);
     playBtn.textContent = seq.running ? "■ STOP" : "▶ PLAY";
   } catch (err) {
@@ -92,7 +122,13 @@ const grooveSel = select(Object.keys(GROOVES), state.grooveName, (v) => {
 const grooveTag = el("span", "tag");
 const randBtn = el("button", undefined, "⤨ RANDOM");
 randBtn.addEventListener("click", randomize);
-transport.append(playBtn, el("span", "tag", "GROOVE"), grooveSel, randBtn, grooveTag);
+const autoBtn = el("button", "auto", "⟳ AUTO");
+autoBtn.addEventListener("click", () => {
+  state.arrangeOn = !state.arrangeOn;
+  autoBtn.classList.toggle("on", state.arrangeOn);
+  if (state.arrangeOn) { arranger.reset(); prevBar = -1; }
+});
+transport.append(playBtn, el("span", "tag", "GROOVE"), grooveSel, randBtn, autoBtn, grooveTag);
 app.appendChild(transport);
 
 // canvases
@@ -142,10 +178,10 @@ function buildLane(lane: Lane): void {
   laneRows.appendChild(row);
 }
 
-function fieldModeCtl(): HTMLElement {
+function labeledSelect(label: string, options: string[], value: string, onChange: (v: string) => void): HTMLElement {
   const wrap = el("div", "ctl");
-  wrap.appendChild(el("label", undefined, "GATE MODE"));
-  wrap.appendChild(select(["MANUAL", "QUANTUM", "AND", "OR"], state.gateMode, (v) => { state.gateMode = v as GateMode; }));
+  wrap.appendChild(el("label", undefined, label));
+  wrap.appendChild(select(options, value, onChange));
   return wrap;
 }
 
@@ -164,16 +200,30 @@ function buildGlobals(): void {
     slider("ROLL BUZZ", 25, 150, 1, state.rollRate, (v) => v + "Hz", (v) => { state.rollRate = v; }),
     slider("SUS LEN", 0.15, 1.6, 0.05, state.susLen, (v) => v.toFixed(2) + "s", (v) => { state.susLen = v; }),
     el("div", "tag", "· HADŌ FIELD |ψ|² ·"),
-    fieldModeCtl(),
+    labeledSelect("GATE MODE", ["MANUAL", "QUANTUM", "AND", "OR"], state.gateMode, (v) => { state.gateMode = v as GateMode; }),
     slider("GATE THRESH", 0, 1, 0.02, state.gateThresh, (v) => v.toFixed(2), (v) => { state.gateThresh = v; }),
     slider("DENSITY", 0, 1, 0.05, state.density, (v) => v.toFixed(2), (v) => { state.density = v; }),
     slider("FIELD→VEL", 0, 1, 0.05, state.fieldAmt, (v) => v.toFixed(2), (v) => { state.fieldAmt = v; }),
     slider("FIELD SPEED", 0.1, 3, 0.1, state.fieldSpeed, (v) => v.toFixed(1), (v) => { state.fieldSpeed = v; }),
     slider("EXCITE", 0, 2, 0.05, state.fieldExcite, (v) => v.toFixed(2), (v) => { state.fieldExcite = v; }),
+    el("div", "tag", "· 自動展開 AUTO-ARRANGE ·"),
+    labeledSelect("ENGINE", ARRANGE_ENGINES, state.arrangeEngine, (v) => { state.arrangeEngine = v as ArrangeEngine; }),
+    slider("SECTION", 1, 16, 1, state.sectionBars, (v) => v + "bar", (v) => { state.sectionBars = v; }),
+    slider("INTENSITY", 0, 1, 0.05, state.arrangeIntensity, (v) => v.toFixed(2), (v) => { state.arrangeIntensity = v; }),
+    slider("STAGES", 2, 8, 1, state.arrangeStages, (v) => String(v), (v) => { state.arrangeStages = v; }),
+    el("div", "tag", "· LIQUID (natural-fn) ·"),
+    labeledSelect("SOURCE", NATURE_SOURCES, state.liqSource, (v) => { state.liqSource = v as NatureSource; }),
+    slider("MIX", 0, 1, 0.02, state.liquid, (v) => v.toFixed(2), (v) => { state.liquid = v; }),
+    slider("BASE", 100, 4000, 20, state.liqBase, (v) => v + "Hz", (v) => { state.liqBase = v; }),
+    slider("DEPTH", 0, 3000, 20, state.liqDepth, (v) => v + "Hz", (v) => { state.liqDepth = v; }),
+    slider("RESO Q", 0.5, 24, 0.5, state.liqQ, (v) => v.toFixed(1), (v) => { state.liqQ = v; }),
+    slider("RATE", 0.05, 6, 0.05, state.liqRate, (v) => v.toFixed(2) + "Hz", (v) => { state.liqRate = v; }),
+    slider("DELAY", 0.002, 0.3, 0.002, state.liqDelay, (v) => (v * 1000).toFixed(0) + "ms", (v) => { state.liqDelay = v; }),
+    slider("DELAY MOD", 0, 1, 0.05, state.liqDelayMod, (v) => v.toFixed(2), (v) => { state.liqDelayMod = v; }),
+    slider("FEEDBACK", 0, 0.85, 0.02, state.liqFb, (v) => v.toFixed(2), (v) => { state.liqFb = v; }),
     el("div", "tag", "· MASTER ·"),
     slider("LOW BOOST", 0, 10, 0.5, state.lowBoost, (v) => "+" + v + "dB", (v) => { state.lowBoost = v; }),
     slider("DRIVE", 0, 1, 0.05, state.drive, (v) => v.toFixed(2), (v) => { state.drive = v; }),
-    slider("LIQUID", 0, 1, 0.02, state.liquid, (v) => v.toFixed(2), (v) => { state.liquid = v; }),
     slider("ROOM", 0, 0.5, 0.02, state.reverbMix, (v) => v.toFixed(2), (v) => { state.reverbMix = v; }),
     slider("MASTER", 0, 1.2, 0.05, state.master, (v) => v.toFixed(2), (v) => { state.master = v; }),
   );
@@ -187,7 +237,8 @@ function buildGlobals(): void {
     "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。<br>" +
     "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
-    "LIQUID: 共鳴フィルタが蠢くねちょっとしたリキッド感を少量ブレンド。";
+    "AUTO 自動展開: L-system/フィロタキシス/ロジスティック写像/場(|ψ|²) の自然関数が SECTION 小節ごとにパターンを再生成し、STAGES 段のアークで展開(INTENSITY=変化の強さ)。<br>" +
+    "LIQUID: 高レゾ共鳴フィルタ＋変調ディレイのねちょっとした経路。SOURCE の自然関数(LSYS/LOGISTIC/KURAMOTO/FIELD/SINE)がフィルタを有機的に動かす。BASE/DEPTH/Q/RATE/DELAY/FEEDBACK で追い込み。";
   g.appendChild(hint);
 }
 
@@ -217,6 +268,9 @@ function draw(): void {
   const t = performance.now();
   const dt = Math.min(0.05, (t - lastT) / 1000); lastT = t;
   field.step(dt, state.fieldSpeed); // HADŌ field always evolves
+  // LIQUID moved by a natural function (optionally the field itself)
+  const fSample = Math.max(field.probe(0.2), field.probe(0.5), field.probe(0.8));
+  liqNature = natureMod.step(dt, state.liqRate, state.liqSource, fSample);
   seq.schedule();
   if (engine) engine.apply(engineParams());
   flash *= 0.86;

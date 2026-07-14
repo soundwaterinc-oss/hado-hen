@@ -29,7 +29,7 @@ button {
   padding: 7px 14px; cursor: pointer; text-transform: uppercase;
 }
 button:hover { background: var(--fg); color: #000; }
-button.play.on { background: var(--fg); color: #000; }
+button.play.on, button.auto.on { background: var(--fg); color: #000; }
 
 select {
   font-family: inherit; font-size: 11px; background: #000; color: var(--fg);
