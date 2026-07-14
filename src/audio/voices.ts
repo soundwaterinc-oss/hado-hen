@@ -2,8 +2,8 @@
 // hard-clipped knocks, and a heavy, tight low end. Everything is short, dry and precise
 // (dot感). No melody, no sustain pads — just the grid made audible.
 
-export type Lane = "kick" | "sub" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
-export const LANES: Lane[] = ["kick", "sub", "knock", "roll", "click", "tick", "noise", "beep"];
+export type Lane = "kick" | "sub" | "drag" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
+export const LANES: Lane[] = ["kick", "sub", "drag", "knock", "roll", "click", "tick", "noise", "beep"];
 
 export interface VoiceParams {
   master: number;
@@ -64,6 +64,7 @@ export class Voices {
     switch (lane) {
       case "kick":  return this.kick(time, lvl, p, panPos);
       case "sub":   return this.subVoice(time, lvl, p, panPos);
+      case "drag":  return this.drag(time, lvl, p, panPos);
       case "knock": return this.knock(time, lvl, p, panPos);
       case "roll":  return this.roll(time, lvl, p, panPos);
       case "click": return this.click(time, lvl, p, panPos);
@@ -108,6 +109,26 @@ export class Voices {
     osc.start(time); osc.stop(time + dur + 0.05);
   }
 
+  // DRAG — sub-kick that "引きずる": a deep sine whose pitch glides downward over the hit
+  // and rings out with a long tail → a heavy low-bass dot that smears/drags the low end.
+  private drag(time: number, lvl: number, p: VoiceParams, pan: number): void {
+    const ctx = this.ctx;
+    const f = p.subTune;
+    const osc = ctx.createOscillator(); osc.type = "sine";
+    osc.frequency.setValueAtTime(f * 1.9, time);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.55, time + 0.19); // slow downward drag
+    const shaper = ctx.createWaveShaper();
+    shaper.curve = clipCurve(0.2 + p.kickDrive * 0.35); shaper.oversample = "2x";
+    const dur = 0.42;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(lvl * 1.9, time + 0.001);          // dot attack
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);          // long dragging tail
+    const pn = this.pan(pan * 0.15);
+    osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
+    osc.start(time); osc.stop(time + dur + 0.06);
+  }
+
   // KNOCK — dry wooden/plastic mid knock: short sine burst + hard clip. The "ノック".
   private knock(time: number, lvl: number, p: VoiceParams, pan: number): void {
     const ctx = this.ctx;
@@ -126,33 +147,41 @@ export class Voices {
   // square gate that accelerates over the hit → a hard mechanical buzz that lands with weight.
   private roll(time: number, lvl: number, p: VoiceParams, pan: number): void {
     const ctx = this.ctx;
-    const dur = 0.11 + Math.random() * 0.07;
+    const dur = 0.15 + Math.random() * 0.09;
     const pn = this.pan(pan * 0.4);
     const rate = p.rollRate;
 
-    // fast square gate 0..1 (the buzz), accelerating rate*0.8 → rate*1.35
+    // fast square gate 0..1 (the buzz), accelerating so it reads as "ずずずずッ"
     const gate = ctx.createGain(); gate.gain.value = 0.5;
     const lfo = ctx.createOscillator(); lfo.type = "square";
-    lfo.frequency.setValueAtTime(rate * 0.8, time);
-    lfo.frequency.linearRampToValueAtTime(rate * 1.35, time + dur);
-    const lfoAmt = ctx.createGain(); lfoAmt.gain.value = 0.5;
+    lfo.frequency.setValueAtTime(rate * 0.85, time);
+    lfo.frequency.linearRampToValueAtTime(rate * 1.6, time + dur);
+    const lfoAmt = ctx.createGain(); lfoAmt.gain.value = 0.6; // deeper chop → clearer buzz
     lfo.connect(lfoAmt); lfoAmt.connect(gate.gain);
 
-    // overall AD envelope — hard attack, quick decay
+    // overall AD envelope — hard attack, quick decay. Pushed HOT so the buzz is
+    // unmistakably present and not masked by the kick/sub/drag low end.
     const env = ctx.createGain();
     env.gain.setValueAtTime(0, time);
-    env.gain.linearRampToValueAtTime(lvl * 1.25, time + 0.002);
+    env.gain.linearRampToValueAtTime(lvl * 3.2, time + 0.002);
     env.gain.exponentialRampToValueAtTime(0.0001, time + dur);
 
-    // buzzy noise body (low-mid) + a low sine for the "zu" weight
+    // rasp: mid/high bandpassed noise that CUTS THROUGH the low end (main character)
     const nz = this.noiseSrc(time, dur);
     const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
-    bp.frequency.value = 320 + p.kickDrive * 260; bp.Q.value = 2.2;
+    bp.frequency.value = 700 + p.kickDrive * 900; bp.Q.value = 1.5;
+    const bpG = ctx.createGain(); bpG.gain.value = 1.4;
+    // secondary high fizz layer
+    const nz2 = this.noiseSrc(time, dur);
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 2600;
+    const hpG = ctx.createGain(); hpG.gain.value = 0.6;
+    // low body for the "zu" weight (kept modest so it doesn't fight the sub voices)
     const tone = ctx.createOscillator(); tone.type = "sawtooth";
-    tone.frequency.value = Math.max(70, p.subTune * 1.7);
-    const toneG = ctx.createGain(); toneG.gain.value = 0.5;
+    tone.frequency.value = Math.max(70, p.subTune * 1.5);
+    const toneG = ctx.createGain(); toneG.gain.value = 0.3;
 
-    nz.connect(bp); bp.connect(gate);
+    nz.connect(bp); bp.connect(bpG); bpG.connect(gate);
+    nz2.connect(hp); hp.connect(hpG); hpG.connect(gate);
     tone.connect(toneG); toneG.connect(gate);
     gate.connect(env); env.connect(pn); pn.connect(this.out);
 

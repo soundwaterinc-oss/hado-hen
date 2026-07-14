@@ -11,9 +11,9 @@ import { el, slider, select } from "./ui/controls";
 const state = {
   bpm: 132, swing: 0.0, humanize: 0.0015, accent: 0.5,
   master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
-  subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 60,
+  subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45,
   grooveName: "7+5+9",
-  level: { kick: 1.0, sub: 0.85, knock: 0.7, roll: 0.6, click: 0.65, tick: 0.5, noise: 0.45, beep: 0 } as Record<Lane, number>,
+  level: { kick: 1.0, sub: 0.85, drag: 0.8, knock: 0.7, roll: 1.0, click: 0.65, tick: 0.5, noise: 0.45, beep: 0 } as Record<Lane, number>,
 };
 
 // Audio is created lazily on the first PLAY click (inside the user gesture). If audio
@@ -142,7 +142,8 @@ function buildGlobals(): void {
     "変拍子 = 加算拍子(3+2+2…)の連結 × ポリメーター。<br>" +
     "DOWNBEAT: 各グループ頭 / EUCLID: 小節長に均等 k 発音 / POLY: 独立周期 len で位相ずれ。<br>" +
     "重い低域は KICK(hard-clip)+SUB+LOW BOOST、ドット感は CLICK/TICK/BEEP。<br>" +
-    "ROLL = ずずずず…のバズロール(連符)。ROLL BUZZ でざらつきの速さを調整。";
+    "ROLL = ずずずず…のバズロール(連符)。ROLL BUZZ でざらつきの速さを調整。<br>" +
+    "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。";
   g.appendChild(hint);
 }
 
