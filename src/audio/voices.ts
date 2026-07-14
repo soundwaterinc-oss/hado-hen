@@ -77,24 +77,51 @@ export class Voices {
     }
   }
 
-  // KICK — heavy tight knock: fast pitch drop sine through a hard-clip shaper.
-  // This is the low-end anchor: solid fundamental, square-hard transient.
+  // KICK — click / knock / "プチュ" pop rather than a boomy sub. Three tight parts:
+  //   1) a very short hard-clipped sine snap (the knock + a little low weight)
+  //   2) a wet resonant "puchu" pop: a triangle with a fast pitch drop through a resonant
+  //      lowpass that also sweeps down → the bubbly plosive
+  //   3) a razor high-noise click transient
   private kick(time: number, lvl: number, p: VoiceParams, pan: number): void {
     const ctx = this.ctx;
     const f = p.subTune;
+    const pn = this.pan(pan * 0.2);
+
+    // 1) knock body — short, clicky, keeps a touch of low
     const osc = ctx.createOscillator(); osc.type = "sine";
-    osc.frequency.setValueAtTime(f * 3.4, time);              // sharp click-y attack
-    osc.frequency.exponentialRampToValueAtTime(f, time + 0.02);
+    osc.frequency.setValueAtTime(f * 5, time);
+    osc.frequency.exponentialRampToValueAtTime(f * 1.1, time + 0.01);
     const shaper = ctx.createWaveShaper();
-    shaper.curve = clipCurve(0.4 + p.kickDrive * 0.6); shaper.oversample = "4x";
-    const dur = 0.08;                                          // very tight punch
+    shaper.curve = clipCurve(0.5 + p.kickDrive * 0.5); shaper.oversample = "4x";
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(lvl * 1.9, time + 0.0006);  // +weight
-    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
-    const pn = this.pan(pan * 0.2);
-    osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
-    osc.start(time); osc.stop(time + dur + 0.05);
+    g.gain.linearRampToValueAtTime(lvl * 1.5, time + 0.0004);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);   // knock: very short
+    osc.connect(shaper); shaper.connect(g); g.connect(pn);
+    osc.start(time); osc.stop(time + 0.06);
+
+    // 2) "プチュ" wet pop — pitched triangle + fast down-sweep through a resonant lowpass
+    const pop = ctx.createOscillator(); pop.type = "triangle";
+    const pf = 900 + Math.random() * 500;
+    pop.frequency.setValueAtTime(pf, time);
+    pop.frequency.exponentialRampToValueAtTime(150 + f, time + 0.03);   // "pu"→"chu" drop
+    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 8 + p.kickDrive * 10;
+    lp.frequency.setValueAtTime(pf * 2.2, time);
+    lp.frequency.exponentialRampToValueAtTime(260, time + 0.035);       // wet resonant sweep
+    const pg = ctx.createGain();
+    pg.gain.setValueAtTime(0, time);
+    pg.gain.linearRampToValueAtTime(lvl * 0.9, time + 0.001);
+    pg.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
+    pop.connect(lp); lp.connect(pg); pg.connect(pn);
+    pop.start(time); pop.stop(time + 0.06);
+
+    // 3) razor click transient — knock/click definition
+    const nz = this.noiseSrc(time, 0.004);
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 4200;
+    const cg = this.pluck(time, 0.004, lvl * 0.6);
+    nz.connect(hp); hp.connect(cg); cg.connect(pn);
+
+    pn.connect(this.out);
   }
 
   // SUB — click/knock-leaning low hit: a very sharp pitch-snap sine through a hard clip,
