@@ -45,6 +45,12 @@ const RAW: Record<string, string> = {
   "Gamelan sangsih": "..x...x...x...x.",
   "Gong cycle (16)": "x.......x...x...",
   "Kecak (cak)":     "x.xx.x.xx.x.xx.x",
+  // ---- ECM / jazz drumming cells ----
+  "Jazz ride":      "x...x.x.x...x.x.",  // swung ride ostinato (ding, ding-da)
+  "Ride triplet":   "x..x..x..x..x..x",  // dotted/triplet feel
+  "Jazz comp":      "....x.....x...x.",  // brushed snare comping accents
+  "Brush sweep":    "x.......x.......",  // spacious brush
+  "ECM pulse":      "x.....x...x.....",  // sparse, open
   // ---- breakbeat kit cells (used by the auto-arranger's random breaks; also pickable) ----
   "Break kick 1":     "x..x...x..x.....",
   "Break kick 2":     "x.....x.x...x..x",

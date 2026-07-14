@@ -2,8 +2,8 @@
 // hard-clipped knocks, and a heavy, tight low end. Everything is short, dry and precise
 // (dot感). No melody, no sustain pads — just the grid made audible.
 
-export type Lane = "kick" | "sub" | "drag" | "sus" | "cak" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
-export const LANES: Lane[] = ["kick", "sub", "drag", "sus", "cak", "knock", "roll", "click", "tick", "noise", "beep"];
+export type Lane = "kick" | "sub" | "drag" | "sus" | "cak" | "knock" | "brush" | "ride" | "roll" | "click" | "tick" | "noise" | "beep";
+export const LANES: Lane[] = ["kick", "sub", "drag", "sus", "cak", "knock", "brush", "ride", "roll", "click", "tick", "noise", "beep"];
 
 export interface VoiceParams {
   master: number;
@@ -69,6 +69,8 @@ export class Voices {
       case "sus":   return this.sus(time, lvl, p, panPos);
       case "cak":   return this.cak(time, lvl, panPos);
       case "knock": return this.knock(time, lvl, p, panPos);
+      case "brush": return this.brush(time, lvl, panPos);
+      case "ride":  return this.ride(time, lvl, panPos);
       case "roll":  return this.roll(time, lvl, p, panPos);
       case "click": return this.click(time, lvl, p, panPos);
       case "tick":  return this.tick(time, lvl, panPos);
@@ -242,18 +244,68 @@ export class Voices {
     nz2.connect(hp); hp.connect(tg); tg.connect(pn);
   }
 
-  // KNOCK — dry wooden/plastic mid knock: short sine burst + hard clip. The "ノック".
+  // KNOCK — snare: tuned DOWN, dry mid body + a short noise rattle for snare character.
   private knock(time: number, lvl: number, p: VoiceParams, pan: number): void {
     const ctx = this.ctx;
-    const f = 180 + p.kickDrive * 120;
-    const osc = ctx.createOscillator(); osc.type = "sine";
-    osc.frequency.setValueAtTime(f * 2.4, time);
-    osc.frequency.exponentialRampToValueAtTime(f, time + 0.012);
-    const shaper = ctx.createWaveShaper(); shaper.curve = clipCurve(0.7); shaper.oversample = "2x";
-    const g = this.pluck(time, 0.028, lvl * 1.2);
+    const f = 120 + p.kickDrive * 70;                     // tuned down (was 180+120)
     const pn = this.pan(pan * 0.5);
-    osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
+    const osc = ctx.createOscillator(); osc.type = "sine";
+    osc.frequency.setValueAtTime(f * 2.2, time);
+    osc.frequency.exponentialRampToValueAtTime(f, time + 0.014);
+    const shaper = ctx.createWaveShaper(); shaper.curve = clipCurve(0.55); shaper.oversample = "2x";
+    const g = this.pluck(time, 0.03, lvl * 1.05);
+    osc.connect(shaper); shaper.connect(g); g.connect(pn);
     osc.start(time); osc.stop(time + 0.05);
+    // snare rattle — short bandpassed noise
+    const nz = this.noiseSrc(time, 0.03);
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 1900; bp.Q.value = 0.9;
+    const ng = this.pluck(time, 0.03, lvl * 0.5);
+    nz.connect(bp); bp.connect(ng); ng.connect(pn);
+    pn.connect(this.out);
+  }
+
+  // BRUSH — ECM-jazz brushed snare: a soft filtered-noise "shh" with a gentle attack.
+  private brush(time: number, lvl: number, pan: number): void {
+    const ctx = this.ctx;
+    const pn = this.pan(pan * 0.6);
+    const dur = 0.06 + Math.random() * 0.06;
+    const nz = this.noiseSrc(time, dur);
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
+    bp.frequency.value = 2100 + Math.random() * 1300; bp.Q.value = 0.8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(lvl * 0.5, time + 0.01);   // soft brushed attack
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    nz.connect(bp); bp.connect(g); g.connect(pn); pn.connect(this.out);
+  }
+
+  // RIDE — ECM-jazz ride cymbal: inharmonic metallic "ding" + a soft high wash. Warm, not crashy.
+  private ride(time: number, lvl: number, pan: number): void {
+    const ctx = this.ctx;
+    const pn = this.pan(pan * 0.5);
+    const dur = 0.26 + Math.random() * 0.14;
+    const base = 500 + Math.random() * 70;
+    const bell = ctx.createGain();
+    for (const r of [1, 1.34, 1.79, 2.44, 2.98]) {
+      const o = ctx.createOscillator(); o.type = "square"; o.frequency.value = base * r;
+      const og = ctx.createGain(); og.gain.value = 0.09;
+      o.connect(og); og.connect(bell); o.start(time); o.stop(time + dur);
+    }
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = 3200; bp.Q.value = 0.7;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, time);
+    g.gain.linearRampToValueAtTime(lvl * 0.5, time + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+    bell.connect(bp); bp.connect(g); g.connect(pn);
+    // airy wash
+    const nz = this.noiseSrc(time, dur);
+    const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 6500;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0, time);
+    ng.gain.linearRampToValueAtTime(lvl * 0.18, time + 0.004);
+    ng.gain.exponentialRampToValueAtTime(0.0001, time + dur * 0.8);
+    nz.connect(hp); hp.connect(ng); ng.connect(pn);
+    pn.connect(this.out);
   }
 
   // ROLL — buzz roll / 連符 "ずずずず": low-mid noise + a low body tone, chopped by a fast

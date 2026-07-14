@@ -14,9 +14,9 @@ import { el, slider, select } from "./ui/controls";
 
 // ---- state -----------------------------------------------------------------
 const state = {
-  bpm: 132, swing: 0.0, humanize: 0.0006, accent: 0.5,
-  master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
-  subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.45,
+  bpm: 124, swing: 0.3, humanize: 0.0016, accent: 0.5,
+  master: 0.9, drive: 0.2, lowBoost: 5.5, reverbMix: 0.14,
+  subTune: 46, kickDrive: 0.55, clickTone: 1400, beepTone: 760, rollRate: 42, susLen: 0.5,
   // HADŌ quantum field
   gateMode: "OR" as GateMode, gateThresh: 0.34, density: 0.2, fieldAmt: 0.45, fieldSpeed: 1.0, fieldExcite: 0.6,
   // LIQUID — resonant squelch driven by a natural function
@@ -34,7 +34,7 @@ const state = {
     { target: "— off —",   source: "SINE" as NatureSource,     rate: 0.3,  depth: 0.3 },
   ],
   grooveName: "7+5+9",
-  level: { kick: 1.0, sub: 0.82, drag: 0.7, sus: 0.55, cak: 0.5, knock: 0.6, roll: 0.68, click: 0.62, tick: 0.5, noise: 0.32, beep: 0.2 } as Record<Lane, number>,
+  level: { kick: 1.0, sub: 0.85, drag: 0.72, sus: 0.6, cak: 0.45, knock: 0.62, brush: 0.42, ride: 0.5, roll: 0.6, click: 0.5, tick: 0.42, noise: 0.3, beep: 0.18 } as Record<Lane, number>,
 };
 
 const field = new QuantumField(128);
@@ -432,6 +432,7 @@ function buildGlobals(): void {
     "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。<br>" +
     "WORLD リズム: パターン選択で世界の民族リズム(クラーベ/ベンベ/マクスーム/サンバ/Gnawa/Gamelan/Kecak等)を割当(mode=WORLD)。<br>" +
     "並列混在: ＋layer で各音色に別パターンを重ねられる(最大3層)。mix=OR(和)/AND(積)/XOR(排他)で合成。CAK=ケチャ声。<br>" +
+    "ECMジャズ: RIDE=ライドシンバル(スイング)、BRUSH=ブラシ・スネア、KNOCK=下げたスネア。SWING を上げると跳ねる。deep寄りの低チューニング＋ROOM で空間。<br>" +
     "MOD LFO 自動展開: 各LFOに対象パラメータ(density/gateThresh/subTune/clickTone/rollRate/liqBase等)と自然関数SOURCEを割当て、固定でなく自動で揺れ動かす。depth=変化幅。<br>" +
     "SETTINGS: ＋SAVE で名前付きプリセット保存、選択で読込、EXPORT/IMPORT で JSON 入出力(ブラウザに永続)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +

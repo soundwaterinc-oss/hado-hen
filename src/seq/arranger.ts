@@ -27,14 +27,14 @@ export interface ArrangeGlobals {
 const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
 
 // per-stage voice activity (0 = pulled out, 1 = full), aligned to LANES:
-// [kick, sub, drag, sus, cak, knock, roll, click, tick, noise, beep]
+// [kick, sub, drag, sus, cak, knock, brush, ride, roll, click, tick, noise, beep]
 interface Stage { energy: number; brk: boolean; act: number[] }
 const STAGES: Stage[] = [
-  { energy: 0.50, brk: false, act: [1, 1,   0.5, 0.5, 0,   0.5, 0,   0.7, 0,   0,   0  ] }, // intro (sparse)
-  { energy: 0.72, brk: false, act: [1, 1,   0.7, 0.6, 0.5, 0.9, 0.4, 0.9, 0.6, 0.3, 0.2] }, // build
-  { energy: 0.95, brk: false, act: [1, 1,   0.9, 0.7, 0.8, 1,   0.8, 1,   0.9, 0.7, 0.5] }, // full
-  { energy: 0.80, brk: true,  act: [1, 0.3, 0.2, 0.2, 1,   1,   0.9, 1,   1,   0.6, 0.3] }, // BREAK bridge
-  { energy: 1.00, brk: false, act: [1, 1,   1,   0.8, 0.9, 1,   0.9, 1,   1,   0.8, 0.6] }, // finale
+  { energy: 0.50, brk: false, act: [1, 1,   0.5, 0.5, 0,   0.4, 0.4, 0.8, 0,   0.6, 0,   0,   0  ] }, // intro: kick+sub+ride (ECM open)
+  { energy: 0.72, brk: false, act: [1, 1,   0.7, 0.6, 0.4, 0.8, 0.6, 0.9, 0.4, 0.9, 0.6, 0.3, 0.2] }, // build
+  { energy: 0.95, brk: false, act: [1, 1,   0.9, 0.7, 0.7, 1,   0.6, 1,   0.7, 1,   0.9, 0.7, 0.5] }, // full
+  { energy: 0.80, brk: true,  act: [1, 0.3, 0.2, 0.2, 1,   1,   0.2, 0.3, 0.9, 1,   1,   0.6, 0.3] }, // BREAK: electronic, ride pulled
+  { energy: 1.00, brk: false, act: [1, 1,   1,   0.8, 0.8, 1,   0.5, 0.9, 0.8, 1,   1,   0.8, 0.6] }, // finale
 ];
 const BREAK_ACT = STAGES[3].act;
 
@@ -95,7 +95,7 @@ export class Arranger {
       let lx = 0.31 + 0.4 * ((this.stage % 3) / 3);
       const N = LANES.length;
       LANES.forEach((lane, i) => {
-        if (lane === "kick") return; // anchor
+        if (lane === "kick" || lane === "ride" || lane === "brush") return; // anchor + jazz kit kept
         const c = seq.lanes[lane];
         const l0 = c.layers[0];
         const cv = curve[(i * 3 + this.stage) % curve.length];
