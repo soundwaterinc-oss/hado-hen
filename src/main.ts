@@ -9,9 +9,9 @@ import { el, slider, select } from "./ui/controls";
 
 // ---- state -----------------------------------------------------------------
 const state = {
-  bpm: 132, swing: 0.0, humanize: 0.0015, accent: 0.5,
+  bpm: 132, swing: 0.0, humanize: 0.0006, accent: 0.5,
   master: 0.9, drive: 0.28, lowBoost: 5, reverbMix: 0.0,
-  subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.6,
+  subTune: 52, kickDrive: 0.6, clickTone: 2200, beepTone: 880, rollRate: 45, susLen: 0.45,
   grooveName: "7+5+9",
   level: { kick: 1.0, sub: 0.85, drag: 0.8, sus: 0.6, knock: 0.7, roll: 1.0, click: 0.65, tick: 0.5, noise: 0.45, beep: 0 } as Record<Lane, number>,
 };

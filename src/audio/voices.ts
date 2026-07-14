@@ -82,11 +82,11 @@ export class Voices {
     const ctx = this.ctx;
     const f = p.subTune;
     const osc = ctx.createOscillator(); osc.type = "sine";
-    osc.frequency.setValueAtTime(f * 3.2, time);              // sharp click-y attack
-    osc.frequency.exponentialRampToValueAtTime(f, time + 0.028);
+    osc.frequency.setValueAtTime(f * 3.4, time);              // sharp click-y attack
+    osc.frequency.exponentialRampToValueAtTime(f, time + 0.02);
     const shaper = ctx.createWaveShaper();
     shaper.curve = clipCurve(0.4 + p.kickDrive * 0.6); shaper.oversample = "4x";
-    const dur = 0.15;
+    const dur = 0.10;                                          // tight punch
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, time);
     g.gain.linearRampToValueAtTime(lvl * 1.9, time + 0.0006);  // +weight
@@ -106,7 +106,7 @@ export class Voices {
     osc.frequency.exponentialRampToValueAtTime(f, time + 0.016);
     const shaper = ctx.createWaveShaper();
     shaper.curve = clipCurve(0.5 + p.kickDrive * 0.5); shaper.oversample = "4x";
-    const dur = 0.11;
+    const dur = 0.085;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, time);
     g.gain.linearRampToValueAtTime(lvl * 1.7, time + 0.0005);
@@ -150,10 +150,10 @@ export class Voices {
     const f = p.subTune;
     const osc = ctx.createOscillator(); osc.type = "sine";
     osc.frequency.setValueAtTime(f * 1.9, time);
-    osc.frequency.exponentialRampToValueAtTime(f * 0.55, time + 0.19); // slow downward drag
+    osc.frequency.exponentialRampToValueAtTime(f * 0.7, time + 0.12);  // downward drag (tighter)
     const shaper = ctx.createWaveShaper();
     shaper.curve = clipCurve(0.2 + p.kickDrive * 0.35); shaper.oversample = "2x";
-    const dur = 0.42;
+    const dur = 0.26;
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, time);
     g.gain.linearRampToValueAtTime(lvl * 1.9, time + 0.001);          // dot attack
@@ -171,10 +171,10 @@ export class Voices {
     osc.frequency.setValueAtTime(f * 2.4, time);
     osc.frequency.exponentialRampToValueAtTime(f, time + 0.012);
     const shaper = ctx.createWaveShaper(); shaper.curve = clipCurve(0.7); shaper.oversample = "2x";
-    const g = this.pluck(time, 0.05, lvl * 1.2);
+    const g = this.pluck(time, 0.036, lvl * 1.2);
     const pn = this.pan(pan * 0.5);
     osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
-    osc.start(time); osc.stop(time + 0.08);
+    osc.start(time); osc.stop(time + 0.06);
   }
 
   // ROLL — buzz roll / 連符 "ずずずず": low-mid noise + a low body tone, chopped by a fast
