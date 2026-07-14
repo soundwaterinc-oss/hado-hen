@@ -77,48 +77,50 @@ export class Voices {
     }
   }
 
-  // KICK — click / knock / "プチュ" pop rather than a boomy sub. Three tight parts:
+  // KICK — click / knock / "プチュプチュ" pop rather than a boomy sub. Tight parts:
   //   1) a very short hard-clipped sine snap (the knock + a little low weight)
-  //   2) a wet resonant "puchu" pop: a triangle with a fast pitch drop through a resonant
-  //      lowpass that also sweeps down → the bubbly plosive
+  //   2) TWO quick wet resonant pops (high-Q lowpass + fast pitch/cutoff drop) → "プチュプチュ"
   //   3) a razor high-noise click transient
   private kick(time: number, lvl: number, p: VoiceParams, pan: number): void {
     const ctx = this.ctx;
     const f = p.subTune;
     const pn = this.pan(pan * 0.2);
 
-    // 1) knock body — short, clicky, keeps a touch of low
+    // 1) knock body — short, clicky, subdued so the pop leads
     const osc = ctx.createOscillator(); osc.type = "sine";
     osc.frequency.setValueAtTime(f * 5, time);
-    osc.frequency.exponentialRampToValueAtTime(f * 1.1, time + 0.01);
+    osc.frequency.exponentialRampToValueAtTime(f * 1.1, time + 0.009);
     const shaper = ctx.createWaveShaper();
     shaper.curve = clipCurve(0.5 + p.kickDrive * 0.5); shaper.oversample = "4x";
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, time);
-    g.gain.linearRampToValueAtTime(lvl * 1.5, time + 0.0004);
-    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.045);   // knock: very short
+    g.gain.linearRampToValueAtTime(lvl * 1.2, time + 0.0004);
+    g.gain.exponentialRampToValueAtTime(0.0001, time + 0.035);
     osc.connect(shaper); shaper.connect(g); g.connect(pn);
-    osc.start(time); osc.stop(time + 0.06);
+    osc.start(time); osc.stop(time + 0.05);
 
-    // 2) "プチュ" wet pop — pitched triangle + fast down-sweep through a resonant lowpass
-    const pop = ctx.createOscillator(); pop.type = "triangle";
-    const pf = 900 + Math.random() * 500;
-    pop.frequency.setValueAtTime(pf, time);
-    pop.frequency.exponentialRampToValueAtTime(150 + f, time + 0.03);   // "pu"→"chu" drop
-    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 8 + p.kickDrive * 10;
-    lp.frequency.setValueAtTime(pf * 2.2, time);
-    lp.frequency.exponentialRampToValueAtTime(260, time + 0.035);       // wet resonant sweep
-    const pg = ctx.createGain();
-    pg.gain.setValueAtTime(0, time);
-    pg.gain.linearRampToValueAtTime(lvl * 0.9, time + 0.001);
-    pg.gain.exponentialRampToValueAtTime(0.0001, time + 0.04);
-    pop.connect(lp); lp.connect(pg); pg.connect(pn);
-    pop.start(time); pop.stop(time + 0.06);
+    // 2) wet resonant "プチュ" pop — strong & tight; fired twice for "プチュプチュ"
+    const pop = (t: number, pf: number, plvl: number): void => {
+      const o = ctx.createOscillator(); o.type = "triangle";
+      o.frequency.setValueAtTime(pf, t);
+      o.frequency.exponentialRampToValueAtTime(140 + f, t + 0.018);          // "pu"→"chu"
+      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 14 + p.kickDrive * 14; // wetter
+      lp.frequency.setValueAtTime(pf * 2.4, t);
+      lp.frequency.exponentialRampToValueAtTime(240, t + 0.02);              // fast resonant sweep
+      const eg = ctx.createGain();
+      eg.gain.setValueAtTime(0, t);
+      eg.gain.linearRampToValueAtTime(plvl, t + 0.0008);
+      eg.gain.exponentialRampToValueAtTime(0.0001, t + 0.026);              // very tight
+      o.connect(lp); lp.connect(eg); eg.connect(pn);
+      o.start(t); o.stop(t + 0.04);
+    };
+    pop(time, 1000 + Math.random() * 500, lvl * 1.5);            // プ
+    pop(time + 0.02, 640 + Math.random() * 360, lvl * 1.05);     // チュ (quick second)
 
     // 3) razor click transient — knock/click definition
     const nz = this.noiseSrc(time, 0.004);
     const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 4200;
-    const cg = this.pluck(time, 0.004, lvl * 0.6);
+    const cg = this.pluck(time, 0.004, lvl * 0.55);
     nz.connect(hp); hp.connect(cg); cg.connect(pn);
 
     pn.connect(this.out);

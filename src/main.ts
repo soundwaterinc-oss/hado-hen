@@ -24,6 +24,8 @@ const state = {
   liqRate: 0.5, liqDelay: 0.05, liqDelayMod: 0.4, liqFb: 0.4,
   // 自動展開 (auto-arranger)
   arrangeOn: false, arrangeEngine: "LSYSTEM" as ArrangeEngine, sectionBars: 4, arrangeIntensity: 0.6, arrangeStages: 5,
+  // リズム自動変化 (continuous drift, on by default)
+  varyOn: true, varyAmt: 0.35, varyBars: 2,
   // MOD LFOs — major params auto-evolve via natural functions instead of staying fixed
   mods: [
     { target: "liqBase",   source: "LSYS" as NatureSource,     rate: 0.12, depth: 0.4 },
@@ -90,15 +92,32 @@ const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
   onStep: (bi, _ui, _units, isDown, _time) => {
     curBar = bi;
     if (isDown) flash = 1;
-    if (bi !== prevBar) { prevBar = bi; arranger.notifyBar(arrangeOpts(), seq, (p) => field.probe(p), applyArrange); }
+    if (bi !== prevBar) {
+      prevBar = bi; barCount++;
+      arranger.notifyBar(arrangeOpts(), seq, (p) => field.probe(p), applyArrange);
+      if (state.varyOn && barCount % Math.max(1, state.varyBars) === 0) autoVary();
+    }
   },
 }, seqParams);
 
-let prevBar = -1;
+let prevBar = -1, barCount = 0;
 const arrangeOpts = (): ArrangeOpts => ({
   on: state.arrangeOn, engine: state.arrangeEngine, sectionBars: state.sectionBars,
   intensity: state.arrangeIntensity, stages: state.arrangeStages,
 });
+
+// リズム自動変化 — small per-bar drift of rotation / density so the groove keeps evolving
+// even without the full auto-arranger. Kick stays the anchor.
+function autoVary(): void {
+  const amt = state.varyAmt;
+  for (const lane of LANES) {
+    if (lane === "kick") continue;
+    const l0 = seq.lanes[lane].layers[0];
+    if (Math.random() < amt * 0.6) l0.rot = (l0.rot + (Math.random() < 0.5 ? 1 : 15)) % 16;      // drift rotation
+    if (Math.random() < amt * 0.18) l0.k = Math.max(1, Math.min(13, l0.k + (Math.random() < 0.5 ? 1 : -1))); // drift density
+    if (Math.random() < amt * 0.06) l0.len = Math.max(2, Math.min(16, l0.len + (Math.random() < 0.5 ? 1 : -1)));
+  }
+}
 function applyArrange(g: { density: number; gateThresh: number; liqDepth: number; liqRate: number }): void {
   state.density = g.density; state.gateThresh = g.gateThresh;
   state.liqDepth = g.liqDepth; state.liqRate = g.liqRate;
@@ -146,7 +165,7 @@ playBtn.addEventListener("click", async () => {
     await engine.resume();
     seq.toggle();
     if (seq.running) {
-      arranger.reset(); prevBar = -1; lastTick = performance.now();
+      arranger.reset(); prevBar = -1; barCount = 0; lastTick = performance.now();
       clock.postMessage({ type: "start", interval: 40 }); // worker drives scheduling → background-safe
     } else {
       clock.postMessage({ type: "stop" });
@@ -182,7 +201,13 @@ autoBtn.addEventListener("click", () => {
   autoBtn.classList.toggle("on", state.arrangeOn);
   if (state.arrangeOn) { arranger.reset(); prevBar = -1; }
 });
-transport.append(playBtn, el("span", "tag", "GROOVE"), grooveSel, randBtn, autoBtn, grooveTag);
+const varyBtn = el("button", "auto", "↝ VARY");
+if (state.varyOn) varyBtn.classList.add("on");
+varyBtn.addEventListener("click", () => {
+  state.varyOn = !state.varyOn;
+  varyBtn.classList.toggle("on", state.varyOn);
+});
+transport.append(playBtn, el("span", "tag", "GROOVE"), grooveSel, randBtn, autoBtn, varyBtn, grooveTag);
 app.appendChild(transport);
 
 // ---- settings / presets ----------------------------------------------------
@@ -374,6 +399,8 @@ function buildGlobals(): void {
     slider("SECTION", 1, 16, 1, state.sectionBars, (v) => v + "bar", (v) => { state.sectionBars = v; }),
     slider("INTENSITY", 0, 1, 0.05, state.arrangeIntensity, (v) => v.toFixed(2), (v) => { state.arrangeIntensity = v; }),
     slider("STAGES", 2, 8, 1, state.arrangeStages, (v) => String(v), (v) => { state.arrangeStages = v; }),
+    slider("VARY AMT", 0, 1, 0.05, state.varyAmt, (v) => v.toFixed(2), (v) => { state.varyAmt = v; }),
+    slider("VARY BARS", 1, 8, 1, state.varyBars, (v) => v + "bar", (v) => { state.varyBars = v; }),
     el("div", "tag", "· MOD LFO 自動展開 ·"),
     ...state.mods.map((_, i) => modRow(i)),
     el("div", "tag", "· LIQUID (natural-fn) ·"),
@@ -407,6 +434,7 @@ function buildGlobals(): void {
     "SETTINGS: ＋SAVE で名前付きプリセット保存、選択で読込、EXPORT/IMPORT で JSON 入出力(ブラウザに永続)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
     "AUTO 自動展開: L-system/フィロタキシス/ロジスティック写像/場(|ψ|²) の自然関数が SECTION 小節ごとにパターンを再生成し、STAGES 段のアークで展開(INTENSITY=変化の強さ)。<br>" +
+    "VARY リズム自動変化: VARY BARS 小節ごとに各音色の回転/密度を少しずつドリフト(VARY AMT=強さ)。AUTOより控えめで常時変化。<br>" +
     "LIQUID: 高レゾ共鳴フィルタ＋変調ディレイのねちょっとした経路。SOURCE の自然関数(LSYS/LOGISTIC/KURAMOTO/FIELD/SINE)がフィルタを有機的に動かす。BASE/DEPTH/Q/RATE/DELAY/FEEDBACK で追い込み。";
   g.appendChild(hint);
 }
