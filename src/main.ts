@@ -16,13 +16,17 @@ const state = {
   level: { kick: 1.0, sub: 0.85, knock: 0.7, click: 0.65, tick: 0.5, noise: 0.45, beep: 0 } as Record<Lane, number>,
 };
 
-const engine = new AudioEngine();
+// Audio is created lazily on the first PLAY click (inside the user gesture). If audio
+// init fails on a device, the whole UI still renders — the play button always appears.
+let engine: AudioEngine | null = null;
+let freqData: Uint8Array<ArrayBuffer> | null = null;
+let timeData: Uint8Array<ArrayBuffer> | null = null;
 const seqParams = (): SeqParams => ({ bpm: state.bpm, swing: state.swing, humanize: state.humanize, accent: state.accent });
 
 let curBar = 0, curUnit = 0, flash = 0;
 const seq = new Sequencer(GROOVES[state.grooveName] as Groove, {
-  now: () => engine.now,
-  fire: (lane, time, vel, pan) => engine.voices.trigger(lane, time, vel, voiceParams(), pan),
+  now: () => (engine ? engine.now : 0),
+  fire: (lane, time, vel, pan) => engine?.voices.trigger(lane, time, vel, voiceParams(), pan),
   onStep: (bi, ui, _units, isDown, _time) => {
     curBar = bi; curUnit = ui;
     if (isDown) flash = 1;
@@ -36,7 +40,7 @@ function voiceParams(): VoiceParams {
   };
 }
 function engineParams(): EngineParams {
-  return { master: state.master, drive: state.drive, lowBoost: state.lowBoost, reverbMix: state.reverbMix, analyser: engine.analyser };
+  return { master: state.master, drive: state.drive, lowBoost: state.lowBoost, reverbMix: state.reverbMix };
 }
 
 // ---- UI --------------------------------------------------------------------
@@ -52,10 +56,20 @@ app.appendChild(header);
 const transport = el("div", "transport");
 const playBtn = el("button", "play", "▶ PLAY");
 playBtn.addEventListener("click", async () => {
-  await engine.resume();
-  seq.toggle();
-  playBtn.classList.toggle("on", seq.running);
-  playBtn.textContent = seq.running ? "■ STOP" : "▶ PLAY";
+  try {
+    if (!engine) {
+      engine = new AudioEngine();
+      freqData = new Uint8Array(new ArrayBuffer(engine.analyser.frequencyBinCount));
+      timeData = new Uint8Array(new ArrayBuffer(engine.analyser.fftSize));
+    }
+    await engine.resume();
+    seq.toggle();
+    playBtn.classList.toggle("on", seq.running);
+    playBtn.textContent = seq.running ? "■ STOP" : "▶ PLAY";
+  } catch (err) {
+    console.error("audio init failed", err);
+    playBtn.textContent = "⚠ AUDIO ERROR";
+  }
 });
 const grooveSel = select(Object.keys(GROOVES), state.grooveName, (v) => {
   state.grooveName = v; seq.setGroove(GROOVES[v] as Groove);
@@ -148,32 +162,34 @@ function randomize(): void {
 // ---- render loop -----------------------------------------------------------
 const sctx = scope.getContext("2d")!;
 const gctx = gridC.getContext("2d")!;
-const freqData = new Uint8Array(engine.analyser.frequencyBinCount);
-const timeData = new Uint8Array(engine.analyser.fftSize);
 
 function draw(): void {
   seq.schedule();
-  engine.apply(engineParams());
+  if (engine) engine.apply(engineParams());
   flash *= 0.86;
   grooveTag.textContent = `${state.grooveName} · bar ${curBar + 1}/${seq.groove.length}`;
 
-  // dot scope — Ikeda: sparse points from the time-domain signal
-  engine.analyser.getByteTimeDomainData(timeData);
-  engine.analyser.getByteFrequencyData(freqData);
+  // dot scope — Ikeda: sparse points from the time-domain signal (once audio is live)
   sctx.fillStyle = "#000"; sctx.fillRect(0, 0, scope.width, scope.height);
-  sctx.fillStyle = "#fff";
-  const N = timeData.length, step = 4;
-  for (let i = 0; i < N; i += step) {
-    const x = (i / N) * scope.width;
-    const y = (timeData[i] / 255) * scope.height;
-    sctx.fillRect(x, y, 1.5, 1.5);
+  if (engine && freqData && timeData) {
+    engine.analyser.getByteTimeDomainData(timeData);
+    engine.analyser.getByteFrequencyData(freqData);
+    sctx.fillStyle = "#fff";
+    const N = timeData.length, step = 4;
+    for (let i = 0; i < N; i += step) {
+      const x = (i / N) * scope.width;
+      const y = (timeData[i] / 255) * scope.height;
+      sctx.fillRect(x, y, 1.5, 1.5);
+    }
+    // low-end meter bar (bottom): mean of low bins → shows the weight
+    let low = 0; const nb = 24;
+    for (let i = 0; i < nb; i++) low += freqData[i];
+    low = low / nb / 255;
+    sctx.fillRect(0, scope.height - 3, low * scope.width, 3);
+  } else {
+    sctx.fillStyle = "#444"; sctx.font = "11px monospace"; sctx.textBaseline = "middle";
+    sctx.fillText("press ▶ PLAY to start audio", 12, scope.height / 2);
   }
-  // low-end meter bar (bottom): mean of low bins → shows the weight
-  let low = 0; const nb = 24;
-  for (let i = 0; i < nb; i++) low += freqData[i];
-  low = low / nb / 255;
-  sctx.fillStyle = "#fff";
-  sctx.fillRect(0, scope.height - 3, low * scope.width, 3);
 
   drawGrid();
   requestAnimationFrame(draw);

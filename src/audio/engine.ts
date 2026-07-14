@@ -28,7 +28,6 @@ export interface EngineParams {
   drive: number;      // master saturation
   lowBoost: number;   // dB low-shelf @ 90 Hz
   reverbMix: number;  // 0..1 short room send
-  analyser: AnalyserNode;
 }
 
 export class AudioEngine {
@@ -44,7 +43,9 @@ export class AudioEngine {
   started = false;
 
   constructor() {
-    this.ctx = new AudioContext({ sampleRate: 48000, latencyHint: "interactive" });
+    // No forced sampleRate: forcing one the hardware doesn't support throws on some
+    // browsers (which would blank the whole page). Use the device default.
+    this.ctx = new AudioContext({ latencyHint: "interactive" });
     const ctx = this.ctx;
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 1024; this.analyser.smoothingTimeConstant = 0.6;
