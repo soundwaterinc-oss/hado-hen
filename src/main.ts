@@ -6,6 +6,7 @@ import { type Lane, LANES, type VoiceParams } from "./audio/voices";
 import { Sequencer, laneHit, METERS, FOLLOW, type LaneMode, type SeqParams, type GateMode } from "./seq/sequencer";
 import { GROOVES, type Groove } from "./seq/meter";
 import { QuantumField } from "./field/field";
+import { WORLD_NAMES } from "./seq/world";
 import { NatureMod, NATURE_SOURCES, type NatureSource } from "./seq/nature";
 import { Arranger, ARRANGE_ENGINES, type ArrangeEngine, type ArrangeOpts } from "./seq/arranger";
 import { el, slider, select } from "./ui/controls";
@@ -131,6 +132,66 @@ autoBtn.addEventListener("click", () => {
 transport.append(playBtn, el("span", "tag", "GROOVE"), grooveSel, randBtn, autoBtn, grooveTag);
 app.appendChild(transport);
 
+// ---- settings / presets ----------------------------------------------------
+const LS_KEY = "hadohen.presets.v1";
+type Settings = { v: number; state: typeof state; lanes: typeof seq.lanes };
+function loadPresets(): Record<string, Settings> {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); } catch { return {}; }
+}
+function storePresets(p: Record<string, Settings>): void { localStorage.setItem(LS_KEY, JSON.stringify(p)); }
+function snapshot(): Settings {
+  return { v: 1, state: JSON.parse(JSON.stringify(state)), lanes: JSON.parse(JSON.stringify(seq.lanes)) };
+}
+function applySettings(s: Settings | undefined): void {
+  if (!s || !s.state) return;
+  Object.assign(state, s.state);
+  if (s.lanes) for (const k of LANES) if (s.lanes[k]) Object.assign(seq.lanes[k], s.lanes[k]);
+  if (!GROOVES[state.grooveName]) state.grooveName = Object.keys(GROOVES)[0];
+  seq.setGroove(GROOVES[state.grooveName] as Groove);
+  grooveSel.value = state.grooveName;
+  autoBtn.classList.toggle("on", state.arrangeOn);
+  rebuildLanes(); rebuildGlobals();
+}
+
+const transport2 = el("div", "transport");
+const presetSel = select(["— presets —"], "— presets —", (v) => {
+  const p = loadPresets(); if (p[v]) applySettings(p[v]);
+});
+function refreshPresetSel(): void {
+  presetSel.replaceChildren();
+  for (const n of ["— presets —", ...Object.keys(loadPresets())]) {
+    const o = el("option"); o.value = n; o.textContent = n; presetSel.appendChild(o);
+  }
+}
+const saveBtn = el("button", undefined, "＋ SAVE");
+saveBtn.addEventListener("click", () => {
+  const name = prompt("preset name?");
+  if (!name) return;
+  const p = loadPresets(); p[name] = snapshot(); storePresets(p); refreshPresetSel(); presetSel.value = name;
+});
+const delBtn = el("button", undefined, "🗑 DEL");
+delBtn.addEventListener("click", () => {
+  const name = presetSel.value; if (name.startsWith("—")) return;
+  const p = loadPresets(); delete p[name]; storePresets(p); refreshPresetSel();
+});
+const expBtn = el("button", undefined, "⇩ EXPORT");
+expBtn.addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(snapshot(), null, 2)], { type: "application/json" }));
+  a.download = "hado-hen-settings.json"; a.click(); URL.revokeObjectURL(a.href);
+});
+const impInput = el("input"); impInput.type = "file"; impInput.accept = "application/json"; impInput.style.display = "none";
+impInput.addEventListener("change", async () => {
+  const f = impInput.files?.[0]; if (!f) return;
+  try { applySettings(JSON.parse(await f.text())); } catch (e) { console.error("import failed", e); }
+  impInput.value = "";
+});
+const impBtn = el("button", undefined, "⇧ IMPORT");
+impBtn.addEventListener("click", () => impInput.click());
+transport2.append(el("span", "tag", "SETTINGS"), saveBtn, presetSel, delBtn, expBtn, impBtn, impInput);
+app.appendChild(transport2);
+refreshPresetSel();
+
 // canvases
 const canvases = el("div", "canvases");
 const scope = el("canvas"); scope.width = 1088; scope.height = 130;
@@ -146,16 +207,22 @@ const laneRows = el("div");
 lanePanel.appendChild(laneRows);
 const globalPanel = el("div", "panel");
 globalPanel.appendChild(el("h2", undefined, "TONE / GROOVE / MASTER"));
+const globalRows = el("div");
+globalPanel.appendChild(globalRows);
 cols.append(lanePanel, globalPanel);
 app.appendChild(cols);
 
-const MODES: LaneMode[] = ["DOWNBEAT", "EUCLID", "POLY", "OFF"];
+const MODES: LaneMode[] = ["DOWNBEAT", "EUCLID", "POLY", "WORLD", "OFF"];
 rebuildLanes();
-buildGlobals();
+rebuildGlobals();
 
 function rebuildLanes(): void {
   laneRows.replaceChildren();
   for (const lane of LANES) buildLane(lane);
+}
+function rebuildGlobals(): void {
+  globalRows.replaceChildren();
+  buildGlobals();
 }
 
 function buildLane(lane: Lane): void {
@@ -167,7 +234,10 @@ function buildLane(lane: Lane): void {
   const modeSel = select(MODES, c.mode, (v) => { c.mode = v as LaneMode; }, undefined);
   row.appendChild(modeSel);
   const sliders = el("div", "sliders");
+  // world rhythm cell — picking one switches the lane to WORLD mode
+  const worldSel = select(WORLD_NAMES, c.pattern, (v) => { c.pattern = v; c.mode = "WORLD"; rebuildLanes(); }, "world");
   sliders.append(
+    worldSel,
     slider("k", 0, 16, 1, c.k, (v) => String(v), (v) => { c.k = v; }),
     slider("len", 1, 16, 1, c.len, (v) => String(v), (v) => { c.len = v; }),
     slider("rot", 0, 15, 1, c.rot, (v) => String(v), (v) => { c.rot = v; }),
@@ -186,7 +256,7 @@ function labeledSelect(label: string, options: string[], value: string, onChange
 }
 
 function buildGlobals(): void {
-  const g = globalPanel;
+  const g = globalRows;
   g.append(
     slider("BPM", 60, 200, 1, state.bpm, (v) => String(v), (v) => { state.bpm = v; }),
     slider("SWING", 0, 0.6, 0.01, state.swing, (v) => v.toFixed(2), (v) => { state.swing = v; }),
@@ -236,6 +306,8 @@ function buildGlobals(): void {
     "DRAG = sub-kick的な低域を引きずるドット(ピッチ下降＋長い余韻)。<br>" +
     "SUB = クリック/ノック寄りの短い低打。SUS = 長めに伸びる持続サブ(SUS LEN で長さ)。<br>" +
     "音別 変拍子: 各レーンの meter を選ぶと独立拍子で回りポリメーターになる(FOLLOW=全体グルーヴ)。<br>" +
+    "WORLD リズム: 各レーンのパターン選択で世界の民族リズム(クラーベ/ベンベ/マクスーム/サンバ等)を割当(mode=WORLD)。異なる伝統が重なり位相する。<br>" +
+    "SETTINGS: ＋SAVE で名前付きプリセット保存、選択で読込、EXPORT/IMPORT で JSON 入出力(ブラウザに永続)。<br>" +
     "HADŌ FIELD: 量子場 |ψ|² が拍をゲート。AND=波動が開いた時だけ発音 / QUANTUM=波動のみ / OR=拍+波動 / MANUAL=場を無視。低音が場を励起し、場が発音密度と強弱を揺らす。<br>" +
     "AUTO 自動展開: L-system/フィロタキシス/ロジスティック写像/場(|ψ|²) の自然関数が SECTION 小節ごとにパターンを再生成し、STAGES 段のアークで展開(INTENSITY=変化の強さ)。<br>" +
     "LIQUID: 高レゾ共鳴フィルタ＋変調ディレイのねちょっとした経路。SOURCE の自然関数(LSYS/LOGISTIC/KURAMOTO/FIELD/SINE)がフィルタを有機的に動かす。BASE/DEPTH/Q/RATE/DELAY/FEEDBACK で追い込み。";

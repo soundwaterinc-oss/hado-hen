@@ -3,17 +3,19 @@
 // 5/8 and 9/8 run at once and phase against each other = per-voice polymeter. Lanes set to
 // "FOLLOW" ride the global groove selected in the transport.
 import { type Groove, type Bar, BARS, GROOVES, barUnits, downbeats, euclid } from "./meter";
+import { WORLD_PATTERNS, DEFAULT_WORLD } from "./world";
 import { type Lane, LANES } from "../audio/voices";
 
-export type LaneMode = "DOWNBEAT" | "EUCLID" | "POLY" | "OFF";
+export type LaneMode = "DOWNBEAT" | "EUCLID" | "POLY" | "WORLD" | "OFF";
 
 export interface LaneCfg {
-  meter: string;  // "FOLLOW" (global groove) or a BARS/GROOVES key → this lane's own 変拍子
+  meter: string;   // "FOLLOW" (global groove) or a BARS/GROOVES key → this lane's own 変拍子
   mode: LaneMode;
-  k: number;      // EUCLID: onsets per bar · POLY: onsets per cycle
-  len: number;    // POLY: cycle length in units
-  rot: number;    // rotation
-  prob: number;   // 0..1 trigger probability
+  k: number;       // EUCLID: onsets per bar · POLY: onsets per cycle
+  len: number;     // POLY: cycle length in units
+  rot: number;     // rotation
+  prob: number;    // 0..1 trigger probability
+  pattern: string; // WORLD: name of the ethnic rhythm cell
 }
 
 // one base-unit slot in a resolved meter timeline
@@ -23,17 +25,18 @@ export const FOLLOW = "FOLLOW";
 // meter options offered to each lane (single bars + chained grooves)
 export const METERS: string[] = [FOLLOW, ...Object.keys(BARS), ...Object.keys(GROOVES)];
 
+const W = DEFAULT_WORLD;
 export const DEFAULT_LANES: Record<Lane, LaneCfg> = {
-  kick:  { meter: FOLLOW, mode: "DOWNBEAT", k: 3, len: 8,  rot: 0, prob: 1 },
-  sub:   { meter: FOLLOW, mode: "POLY",     k: 1, len: 6,  rot: 0, prob: 1 },
-  drag:  { meter: FOLLOW, mode: "POLY",     k: 1, len: 7,  rot: 3, prob: 1 },
-  sus:   { meter: FOLLOW, mode: "POLY",     k: 2, len: 10, rot: 0, prob: 1 },
-  knock: { meter: FOLLOW, mode: "POLY",     k: 3, len: 5,  rot: 0, prob: 1 },
-  roll:  { meter: FOLLOW, mode: "POLY",     k: 2, len: 4,  rot: 0, prob: 0.9 },
-  click: { meter: FOLLOW, mode: "EUCLID",   k: 6, len: 8,  rot: 2, prob: 1 },
-  tick:  { meter: FOLLOW, mode: "POLY",     k: 5, len: 7,  rot: 0, prob: 0.95 },
-  noise: { meter: FOLLOW, mode: "EUCLID",   k: 3, len: 8,  rot: 1, prob: 0.85 },
-  beep:  { meter: FOLLOW, mode: "POLY",     k: 1, len: 12, rot: 5, prob: 0.8 },
+  kick:  { meter: FOLLOW, mode: "DOWNBEAT", k: 3, len: 8,  rot: 0, prob: 1,    pattern: W },
+  sub:   { meter: FOLLOW, mode: "POLY",     k: 1, len: 6,  rot: 0, prob: 1,    pattern: W },
+  drag:  { meter: FOLLOW, mode: "POLY",     k: 1, len: 7,  rot: 3, prob: 1,    pattern: W },
+  sus:   { meter: FOLLOW, mode: "POLY",     k: 2, len: 10, rot: 0, prob: 1,    pattern: W },
+  knock: { meter: FOLLOW, mode: "POLY",     k: 3, len: 5,  rot: 0, prob: 1,    pattern: W },
+  roll:  { meter: FOLLOW, mode: "POLY",     k: 2, len: 4,  rot: 0, prob: 0.9,  pattern: W },
+  click: { meter: FOLLOW, mode: "EUCLID",   k: 6, len: 8,  rot: 2, prob: 1,    pattern: W },
+  tick:  { meter: FOLLOW, mode: "POLY",     k: 5, len: 7,  rot: 0, prob: 0.95, pattern: W },
+  noise: { meter: FOLLOW, mode: "EUCLID",   k: 3, len: 8,  rot: 1, prob: 0.85, pattern: W },
+  beep:  { meter: FOLLOW, mode: "POLY",     k: 1, len: 12, rot: 5, prob: 0.8,  pattern: W },
 };
 
 export type GateMode = "MANUAL" | "QUANTUM" | "AND" | "OR";
@@ -75,6 +78,11 @@ export function laneHit(c: LaneCfg, units: number, downs: Set<number>, unitInBar
     case "POLY": {
       const L = Math.max(1, Math.round(c.len));
       return euclid(c.k, L, c.rot)[((globalUnit % L) + L) % L];
+    }
+    case "WORLD": {
+      const pat = WORLD_PATTERNS[c.pattern] ?? WORLD_PATTERNS[DEFAULT_WORLD];
+      const L = pat.length;
+      return pat[((globalUnit % L) + L) % L];
     }
   }
 }
