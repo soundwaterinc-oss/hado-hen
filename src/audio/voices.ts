@@ -2,8 +2,8 @@
 // hard-clipped knocks, and a heavy, tight low end. Everything is short, dry and precise
 // (dot感). No melody, no sustain pads — just the grid made audible.
 
-export type Lane = "kick" | "sub" | "knock" | "click" | "tick" | "noise" | "beep";
-export const LANES: Lane[] = ["kick", "sub", "knock", "click", "tick", "noise", "beep"];
+export type Lane = "kick" | "sub" | "knock" | "roll" | "click" | "tick" | "noise" | "beep";
+export const LANES: Lane[] = ["kick", "sub", "knock", "roll", "click", "tick", "noise", "beep"];
 
 export interface VoiceParams {
   master: number;
@@ -11,6 +11,7 @@ export interface VoiceParams {
   kickDrive: number;   // 0..1 hard-clip amount → weight & hardness
   clickTone: number;   // Hz, click centre
   beepTone: number;    // Hz, pure test-tone dot
+  rollRate: number;    // Hz, buzz gate rate of the roll (ずずずず)
   level: Record<Lane, number>;
 }
 
@@ -64,6 +65,7 @@ export class Voices {
       case "kick":  return this.kick(time, lvl, p, panPos);
       case "sub":   return this.subVoice(time, lvl, p, panPos);
       case "knock": return this.knock(time, lvl, p, panPos);
+      case "roll":  return this.roll(time, lvl, p, panPos);
       case "click": return this.click(time, lvl, p, panPos);
       case "tick":  return this.tick(time, lvl, panPos);
       case "noise": return this.noiseHit(time, lvl, panPos);
@@ -118,6 +120,44 @@ export class Voices {
     const pn = this.pan(pan * 0.5);
     osc.connect(shaper); shaper.connect(g); g.connect(pn); pn.connect(this.out);
     osc.start(time); osc.stop(time + 0.08);
+  }
+
+  // ROLL — buzz roll / 連符 "ずずずず": low-mid noise + a low body tone, chopped by a fast
+  // square gate that accelerates over the hit → a hard mechanical buzz that lands with weight.
+  private roll(time: number, lvl: number, p: VoiceParams, pan: number): void {
+    const ctx = this.ctx;
+    const dur = 0.11 + Math.random() * 0.07;
+    const pn = this.pan(pan * 0.4);
+    const rate = p.rollRate;
+
+    // fast square gate 0..1 (the buzz), accelerating rate*0.8 → rate*1.35
+    const gate = ctx.createGain(); gate.gain.value = 0.5;
+    const lfo = ctx.createOscillator(); lfo.type = "square";
+    lfo.frequency.setValueAtTime(rate * 0.8, time);
+    lfo.frequency.linearRampToValueAtTime(rate * 1.35, time + dur);
+    const lfoAmt = ctx.createGain(); lfoAmt.gain.value = 0.5;
+    lfo.connect(lfoAmt); lfoAmt.connect(gate.gain);
+
+    // overall AD envelope — hard attack, quick decay
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, time);
+    env.gain.linearRampToValueAtTime(lvl * 1.25, time + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.0001, time + dur);
+
+    // buzzy noise body (low-mid) + a low sine for the "zu" weight
+    const nz = this.noiseSrc(time, dur);
+    const bp = ctx.createBiquadFilter(); bp.type = "bandpass";
+    bp.frequency.value = 320 + p.kickDrive * 260; bp.Q.value = 2.2;
+    const tone = ctx.createOscillator(); tone.type = "sawtooth";
+    tone.frequency.value = Math.max(70, p.subTune * 1.7);
+    const toneG = ctx.createGain(); toneG.gain.value = 0.5;
+
+    nz.connect(bp); bp.connect(gate);
+    tone.connect(toneG); toneG.connect(gate);
+    gate.connect(env); env.connect(pn); pn.connect(this.out);
+
+    lfo.start(time); lfo.stop(time + dur + 0.02);
+    tone.start(time); tone.stop(time + dur + 0.02);
   }
 
   // CLICK — Ikeda razor: pure sine pip with a tiny noise transient on top.

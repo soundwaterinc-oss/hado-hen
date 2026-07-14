@@ -18,6 +18,7 @@ export const DEFAULT_LANES: Record<Lane, LaneCfg> = {
   kick:  { mode: "DOWNBEAT", k: 3, len: 8,  rot: 0, prob: 1 },
   sub:   { mode: "POLY",     k: 1, len: 6,  rot: 0, prob: 1 },
   knock: { mode: "POLY",     k: 3, len: 5,  rot: 0, prob: 1 },
+  roll:  { mode: "EUCLID",   k: 2, len: 8,  rot: 6, prob: 0.7 },
   click: { mode: "EUCLID",   k: 5, len: 8,  rot: 2, prob: 1 },
   tick:  { mode: "POLY",     k: 5, len: 7,  rot: 0, prob: 0.9 },
   noise: { mode: "EUCLID",   k: 2, len: 8,  rot: 1, prob: 0.8 },
